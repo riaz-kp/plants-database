@@ -1,5 +1,6 @@
 from typing import Any
 from fastapi import APIRouter, Depends
+from fastapi_cache.decorator import cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -13,6 +14,7 @@ from app.schemas.dashboard import DashboardStats
 router = APIRouter()
 
 @router.get("/stats", response_model=DashboardStats)
+@cache(expire=300)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db)
 ) -> Any:

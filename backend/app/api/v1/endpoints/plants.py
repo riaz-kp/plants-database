@@ -2,6 +2,7 @@ from typing import Any, List, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi_cache.decorator import cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 @router.get("/", response_model=PlantListResponse)
+@cache(expire=600)
 async def read_plants(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
@@ -151,6 +153,7 @@ async def create_plant(
     return result.scalars().first()
 
 @router.get("/{plant_id}", response_model=PlantResponse)
+@cache(expire=600)
 async def read_plant(
     *,
     db: AsyncSession = Depends(get_db),

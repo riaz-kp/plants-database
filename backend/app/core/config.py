@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     # Groq AI
     GROQ_API_KEY: str = ""
 
+    # Redis
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: str = "6379"
+    REDIS_DB: str = "0"
+    REDIS_URL: str = None
+
+    @validator("REDIS_URL", pre=True)
+    def assemble_redis_url(cls, v: Union[str, None], values: dict[str, any]) -> any:
+        if isinstance(v, str) and v:
+            return v
+        return f"redis://{values.get('REDIS_HOST')}:{values.get('REDIS_PORT')}/{values.get('REDIS_DB')}"
+
     # Auth
     ADMIN_USERNAME: str = ""
     ADMIN_PASSWORD: str = ""

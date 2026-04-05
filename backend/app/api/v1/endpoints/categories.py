@@ -2,6 +2,7 @@ import uuid
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi_cache.decorator import cache
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,7 @@ from app.schemas.category import CategoryResponse, CategoryCreate, CategoryUpdat
 router = APIRouter()
 
 @router.get("/", response_model=CategoryListResponse)
+@cache(expire=3600)
 async def read_categories(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
