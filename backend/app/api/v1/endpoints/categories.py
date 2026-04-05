@@ -2,6 +2,7 @@ import uuid
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi_cache import FastAPICache
 from fastapi_cache.decorator import cache
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ from app.schemas.category import CategoryResponse, CategoryCreate, CategoryUpdat
 router = APIRouter()
 
 @router.get("/", response_model=CategoryListResponse)
-@cache(expire=3600)
+@cache(expire=3600, namespace="categories")
 async def read_categories(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
@@ -68,6 +69,8 @@ async def create_category(
     db.add(category)
     await db.commit()
     category.plant_count = 0
+    await FastAPICache.clear(namespace="categories")
+    await FastAPICache.clear(namespace="dashboard")
     return category
 
 @router.put("/{category_id}", response_model=CategoryResponse)
@@ -109,6 +112,10 @@ async def update_category(
     count_result = await db.execute(select(func.count(Plant.id)).where(Plant.category == category.name))
     category.plant_count = count_result.scalar_one()
     
+    await FastAPICache.clear(namespace="categories")
+    await FastAPICache.clear(namespace="plants")
+    await FastAPICache.clear(namespace="dashboard")
+    
     return category
 
 @router.delete("/{category_id}")
@@ -129,4 +136,6 @@ async def delete_category(
         
     await db.delete(category)
     await db.commit()
+    await FastAPICache.clear(namespace="categories")
+    await FastAPICache.clear(namespace="dashboard")
     return {"success": True}

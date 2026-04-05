@@ -14,7 +14,7 @@ from app.schemas.dashboard import DashboardStats
 router = APIRouter()
 
 @router.get("/stats", response_model=DashboardStats)
-@cache(expire=300)
+@cache(expire=300, namespace="dashboard")
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db)
 ) -> Any:

@@ -2,6 +2,7 @@ from typing import Any, List, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi_cache import FastAPICache
 from fastapi_cache.decorator import cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 @router.get("/", response_model=PlantListResponse)
-@cache(expire=600)
+@cache(expire=600, namespace="plants")
 async def read_plants(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
@@ -146,6 +147,10 @@ async def create_plant(
     await db.commit()
     await db.refresh(plant)
     
+    await FastAPICache.clear(namespace="plants")
+    await FastAPICache.clear(namespace="categories")
+    await FastAPICache.clear(namespace="dashboard")
+    
     # Reload with relationships
     result = await db.execute(
         select(Plant).filter(Plant.id == plant.id).options(selectinload(Plant.taxon))
@@ -153,7 +158,7 @@ async def create_plant(
     return result.scalars().first()
 
 @router.get("/{plant_id}", response_model=PlantResponse)
-@cache(expire=600)
+@cache(expire=600, namespace="plants")
 async def read_plant(
     *,
     db: AsyncSession = Depends(get_db),
@@ -196,6 +201,10 @@ async def update_plant(
 
     await db.commit()
     await db.refresh(plant)
+    
+    await FastAPICache.clear(namespace="plants")
+    await FastAPICache.clear(namespace="categories")
+    await FastAPICache.clear(namespace="dashboard")
     
     # Reload with relationships
     result = await db.execute(
@@ -252,6 +261,9 @@ async def delete_plant(
             curr_taxon_id = parent_id
         
         await db.commit()
+        await FastAPICache.clear(namespace="plants")
+        await FastAPICache.clear(namespace="categories")
+        await FastAPICache.clear(namespace="dashboard")
         return {"success": True}
     except IntegrityError:
         await db.rollback()

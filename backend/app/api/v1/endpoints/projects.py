@@ -4,6 +4,8 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi_cache import FastAPICache
+from fastapi_cache.decorator import cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 import sqlalchemy as sa
@@ -20,6 +22,7 @@ from app.core.security import get_current_user
 router = APIRouter()
 
 @router.get("/", response_model=ProjectListResponse, dependencies=[Depends(get_current_user)])
+@cache(expire=3600, namespace="projects")
 async def read_projects(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
@@ -75,10 +78,14 @@ async def create_project(
     """
     Create new project.
     """
+    # 2. Create Project
     project = Project(**project_in.model_dump())
     db.add(project)
     await db.commit()
     await db.refresh(project)
+    
+    await FastAPICache.clear(namespace="projects")
+    await FastAPICache.clear(namespace="dashboard")
     
     # Reload with relationships
     query = select(Project).filter(Project.id == project.id).options(
@@ -118,6 +125,7 @@ async def get_project_by_share_token(
 
 
 @router.get("/{project_id}", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
+@cache(expire=3600, namespace="projects")
 async def read_project(
     *,
     db: AsyncSession = Depends(get_db),
@@ -184,6 +192,8 @@ async def add_plant_to_project(
     await db.commit()
     await db.refresh(project)
     
+    await FastAPICache.clear(namespace="projects")
+    
     # Reload project with relationships
     query = select(Project).filter(Project.id == project_id).options(
         selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
@@ -224,6 +234,8 @@ async def update_plant_in_project(
     await db.commit()
     await db.refresh(project)
 
+    await FastAPICache.clear(namespace="projects")
+
     query = select(Project).filter(Project.id == project_id).options(
         selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
     )
@@ -260,6 +272,8 @@ async def remove_plant_from_project(
     await db.commit()
     await db.refresh(project)
 
+    await FastAPICache.clear(namespace="projects")
+
     query = select(Project).filter(Project.id == project_id).options(
         selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
     )
@@ -290,6 +304,8 @@ async def update_project(
     await db.commit()
     await db.refresh(project)
     
+    await FastAPICache.clear(namespace="projects")
+
     # Reload with relationships
     query = select(Project).filter(Project.id == project.id).options(
         selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
@@ -313,6 +329,8 @@ async def delete_project(
     
     await db.delete(project)
     await db.commit()
+    await FastAPICache.clear(namespace="projects")
+    await FastAPICache.clear(namespace="dashboard")
     return {"success": True}
 
 @router.post("/{project_id}/duplicate", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
@@ -355,6 +373,8 @@ async def duplicate_project(
         db.add(new_pp)
     
     await db.commit()
+    await FastAPICache.clear(namespace="projects")
+    await FastAPICache.clear(namespace="dashboard")
 
     # Reload with relationships
     query = select(Project).filter(Project.id == new_project.id).options(
