@@ -2,6 +2,8 @@ from typing import Any, List
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi_cache import FastAPICache
+from fastapi_cache.decorator import cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -13,6 +15,7 @@ from sqlalchemy import func
 router = APIRouter()
 
 @router.get("/tree", response_model=List[TaxonTree])
+@cache(expire=3600, namespace="taxonomy")
 async def get_taxonomy_tree(
     db: AsyncSession = Depends(get_db)
 ) -> Any:
@@ -69,6 +72,8 @@ async def create_taxon(
     db.add(taxon)
     await db.commit()
     await db.refresh(taxon)
+    await FastAPICache.clear(namespace="taxonomy")
+    await FastAPICache.clear(namespace="dashboard")
     return taxon
 
 @router.post("/ensure-path", response_model=TaxonResponse)
@@ -116,9 +121,14 @@ async def ensure_taxonomy_path(
         current_parent_id = taxon.id
         last_taxon = taxon
         
+    await FastAPICache.clear(namespace="taxonomy")
+    await FastAPICache.clear(namespace="plants")
+    await FastAPICache.clear(namespace="dashboard")
+    
     return last_taxon
 
 @router.get("/{taxon_id}", response_model=TaxonResponse)
+@cache(expire=3600, namespace="taxonomy")
 async def read_taxon(
     *,
     db: AsyncSession = Depends(get_db),
@@ -170,6 +180,9 @@ async def update_taxon(
     db.add(taxon)
     await db.commit()
     await db.refresh(taxon)
+    await FastAPICache.clear(namespace="taxonomy")
+    await FastAPICache.clear(namespace="plants")
+    await FastAPICache.clear(namespace="dashboard")
     return taxon
 
 @router.delete("/{taxon_id}")
@@ -200,4 +213,6 @@ async def delete_taxon(
 
     await db.delete(taxon)
     await db.commit()
+    await FastAPICache.clear(namespace="taxonomy")
+    await FastAPICache.clear(namespace="dashboard")
     return {"success": True}

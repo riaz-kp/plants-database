@@ -1,5 +1,7 @@
 from typing import Any, List, Dict
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Body
+from fastapi_cache import FastAPICache
+from fastapi_cache.decorator import cache
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -69,7 +71,12 @@ async def import_plants_csv(file: UploadFile = File(...),
         raise HTTPException(400, 'File must be CSV')
     content = await file.read()
     try:
-        return await process_csv_import(db, content)
+        result = await process_csv_import(db, content)
+        await FastAPICache.clear(namespace="plants")
+        await FastAPICache.clear(namespace="categories")
+        await FastAPICache.clear(namespace="taxonomy")
+        await FastAPICache.clear(namespace="dashboard")
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -83,7 +90,12 @@ async def import_plants_rows(
 ) -> Any:
     """Import plants from pre-edited JSON rows (output from the preview editor)."""
     try:
-        return await process_rows_import(db, rows)
+        result = await process_rows_import(db, rows)
+        await FastAPICache.clear(namespace="plants")
+        await FastAPICache.clear(namespace="categories")
+        await FastAPICache.clear(namespace="taxonomy")
+        await FastAPICache.clear(namespace="dashboard")
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -107,7 +119,7 @@ async def proxy_image(url: str) -> Any:
 
 # ── PDF Export ──────────────────────────────────────────────────────────────
 @router.get('/export/pdf/project/{project_id}')
-
+@cache(expire=3600, namespace="projects")
 async def export_project_pdf(project_id: str,
                              db: AsyncSession = Depends(get_db)) -> Any:
 

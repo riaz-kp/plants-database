@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi_cache.decorator import cache
 from app.schemas.ai import PlantAIDetailsRequest, PlantAIDetailsResponse, PlantImageResponse
 from app.services.ai_service import generate_plant_details
 from app.services.image_service import fetch_inaturalist_images
@@ -10,6 +11,7 @@ async def fetch_plant_details(request: PlantAIDetailsRequest):
     return await generate_plant_details(request.common_name, request.scientific_name, request.categories)
 
 @router.get("/fetch-plant-images", response_model=PlantImageResponse)
+@cache(expire=3600, namespace="ai")
 async def fetch_images(plant_name: str, page: int = 1):
     image_urls = await fetch_inaturalist_images(plant_name, page)
     
