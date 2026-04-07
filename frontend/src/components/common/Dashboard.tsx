@@ -3,7 +3,9 @@ import { Link } from '@tanstack/react-router';
 import { Leaf, ListTree, Tags, FolderKanban, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
-import { dashboardQueryOptions } from '../../api/queryOptions';
+import { dashboardQueryOptions, plantsQueryOptions } from '../../api/queryOptions';
+import { useEffect } from 'react';
+import { queryClient } from '@/api/queryClient';
 
 const StatCard = ({
     title,
@@ -48,6 +50,10 @@ const StatCard = ({
 
 export const Dashboard = () => {
     const { data: stats, isLoading } = useQuery(dashboardQueryOptions());
+
+    useEffect(() => {
+        queryClient.prefetchQuery(plantsQueryOptions({ skip: 0, limit: 20, sort: 'recent' }));
+    }, [])
 
     return (
         <div>
