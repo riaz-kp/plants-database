@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, memo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf
@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib-frontend/utils'; // Use the new utils location
+import { cn } from '@/lib-frontend/utils';
 
 import {
     Files,
@@ -50,7 +50,7 @@ const rankColor: Record<string, string> = {
     SPECIES: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400',
 };
 
-const TreeNode = ({ node, onSelect, selectedId, searchTerm, open, onOpenChange }: TreeNodeProps) => {
+const TreeNode = memo(({ node, onSelect, selectedId, searchTerm, open, onOpenChange }: TreeNodeProps) => {
     const hasChildren = node.children && node.children.length > 0;
     const isSelected = node.id === selectedId;
 
@@ -60,7 +60,7 @@ const TreeNode = ({ node, onSelect, selectedId, searchTerm, open, onOpenChange }
         (node.name.toLowerCase().includes(lowerSearch) || node.rank.toLowerCase().includes(lowerSearch));
 
     const content = (
-        <div className="flex items-center gap-2 min-w-0" onClick={() => onSelect(node)}>
+        <div className="flex items-center gap-2 min-w-0">
             <span
                 className={cn(
                     'shrink-0 text-[10px] w-5 h-5 flex items-center justify-center font-bold uppercase tracking-wider rounded-md border border-current opacity-80',
@@ -82,11 +82,14 @@ const TreeNode = ({ node, onSelect, selectedId, searchTerm, open, onOpenChange }
     if (hasChildren) {
         return (
             <FolderItem value={node.id}>
-                <FolderTrigger className={cn(
-                    "rounded-lg transition-colors group px-1",
-                    isSelected && "bg-primary/5 shadow-sm ring-1 ring-primary/20",
-                    isMatch && !isSelected && "bg-amber-50 dark:bg-amber-950/20"
-                )}>
+                <FolderTrigger 
+                    className={cn(
+                        "rounded-lg transition-colors group px-1",
+                        isSelected && "bg-primary/5 shadow-sm ring-1 ring-primary/20",
+                        isMatch && !isSelected && "bg-amber-50 dark:bg-amber-950/20"
+                    )}
+                    onClick={() => onSelect(node)}
+                >
                     {content}
                 </FolderTrigger>
                 <FolderContent>
@@ -120,11 +123,20 @@ const TreeNode = ({ node, onSelect, selectedId, searchTerm, open, onOpenChange }
                 isSelected && "bg-primary/5 shadow-sm ring-1 ring-primary/20",
                 isMatch && !isSelected && "bg-amber-50 dark:bg-amber-950/20"
             )}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelect(node)}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelect(node);
+                }
+            }}
         >
             {content}
         </FileItem>
     );
-};
+});
 
 /* ─── TaxonomyManager ────────────────────────────────────── */
 export const TaxonomyManager = () => {
@@ -196,13 +208,13 @@ export const TaxonomyManager = () => {
         },
     });
 
-    const getNextRank = (rank: Rank): Rank | null => {
+    const getNextRank = useCallback((rank: Rank): Rank | null => {
         const ranks = Object.values(Rank);
         const idx = ranks.indexOf(rank);
         return idx >= 0 && idx < ranks.length - 1 ? ranks[idx + 1] : null;
-    };
+    }, []);
 
-    const startCreateChild = () => {
+    const startCreateChild = useCallback(() => {
         if (selectedNode) {
             const next = getNextRank(selectedNode.rank);
             if (!next) { showAlert('Cannot create child of Species', 'warning'); return; }
@@ -214,18 +226,18 @@ export const TaxonomyManager = () => {
         setDescription('');
         setIsCreating(true);
         setIsEditing(false);
-    };
+    }, [selectedNode, getNextRank, showAlert]);
 
-    const startEdit = () => {
+    const startEdit = useCallback(() => {
         if (!selectedNode) return;
         setNewName(selectedNode.name);
         setNewRank(selectedNode.rank);
         setDescription(selectedNode.description || '');
         setIsEditing(true);
         setIsCreating(false);
-    };
+    }, [selectedNode]);
 
-    const handleDelete = () => {
+    const handleDelete = useCallback(() => {
         if (!selectedNode) return;
         if (selectedNode.children?.length) {
             showAlert('Cannot delete a taxon that has children.', 'warning');
@@ -237,7 +249,7 @@ export const TaxonomyManager = () => {
             confirmText: 'Delete',
             onConfirm: () => deleteMutation.mutate(selectedNode.id),
         });
-    };
+    }, [selectedNode, confirm, deleteMutation, showAlert]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -253,12 +265,12 @@ export const TaxonomyManager = () => {
         }
     };
 
-    const handleNodeSelect = (node: TaxonTree) => {
+    const handleNodeSelect = useCallback((node: TaxonTree) => {
         setSelectedNode(node);
         setIsEditing(false);
         setIsCreating(false);
         setPanelOpen(true);
-    };
+    }, []);
 
     const filterTree = (nodes: TaxonTree[], term: string): TaxonTree[] => {
         if (!term) return nodes;

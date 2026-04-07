@@ -4,7 +4,7 @@ import { taxonomyTreeQueryOptions } from '@/api/queryOptions';
 
 export const Route = createFileRoute('/_authenticated/taxonomy')({
     loader: ({ context: { queryClient } }) => {
-        queryClient.ensureQueryData(taxonomyTreeQueryOptions());
+        queryClient.prefetchQuery(taxonomyTreeQueryOptions());
     },
     component: TaxonomyManager,
 });

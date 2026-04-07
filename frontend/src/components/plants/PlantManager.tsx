@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, memo, useCallback } from 'react';
 import { useNavigate, useLocation, useSearch } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { plantsApi } from '../../api/plants';
@@ -87,6 +87,194 @@ import {
     History,
 } from 'lucide-react';
 
+
+/* ─── Memoized List Items ────────────────────────────────────────── */
+
+interface PlantItemProps {
+    plant: Plant;
+    isSelected: boolean;
+    onSelect: (id: string) => void;
+    onEdit: (plant: Plant) => void;
+    onDelete: (id: string, name: string) => void;
+    onAddToProject: (id: string) => void;
+    onClick: (id: string, e: React.MouseEvent) => void;
+}
+
+const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onClick }: PlantItemProps) => {
+    const displayImage = plant.image_url || plant.icon_url;
+    return (
+        <Card
+            role="button"
+            tabIndex={0}
+            onClick={(e) => onClick(plant.id, e)}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onClick(plant.id, e as any);
+                }
+            }}
+            className={cn(
+                "group relative overflow-hidden cursor-pointer select-none transition-all duration-200 hover:shadow-lg hover:-translate-y-1 bg-card border-border/60",
+                isSelected ? "ring-2 ring-primary border-primary" : ""
+            )}
+        >
+            <div className="relative aspect-video w-full bg-muted overflow-hidden">
+                {displayImage ? (
+                    <img
+                        src={displayImage}
+                        alt={plant.common_name}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                        <Leaf size={32} className="text-muted-foreground/30" />
+                    </div>
+                )}
+
+                <div className="absolute top-2 left-2 z-10">
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => { e.stopPropagation(); onSelect(plant.id); }}
+                        onClick={e => e.stopPropagation()}
+                        className="w-5 h-5 cursor-pointer accent-primary rounded-md border-white/20 bg-black/20 backdrop-blur-sm"
+                    />
+                </div>
+
+                <div 
+                    className="absolute top-2 right-2 z-10 actions-menu-container" 
+                    role="presentation"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button
+                                variant="secondary"
+                                size="icon"
+                                className="h-8 w-8 rounded-full bg-black/20 hover:bg-black/40 border-0 text-white backdrop-blur-md shadow-sm"
+                            >
+                                <MoreVertical size={16} />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
+                                <FolderOpen className="mr-2 h-4 w-4" />
+                                <span>Add to Project</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onEdit(plant)}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                <span>Edit</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => onDelete(plant.id, plant.common_name)}
+                            >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                <span>Delete</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+            </div>
+
+            <CardContent className="p-4 pt-3">
+                <div className="flex flex-col gap-1 mb-3">
+                    <h3 className="font-semibold text-foreground text-sm tracking-tight leading-snug line-clamp-1">
+                        {plant.common_name}
+                    </h3>
+                    {plant.scientific_name && (
+                        <p className="text-xs italic text-muted-foreground/80 leading-tight line-clamp-1">
+                            {plant.scientific_name}
+                        </p>
+                    )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mt-auto">
+                    <Badge variant="secondary" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold bg-secondary/50 border-secondary/20">
+                        {plant.category}
+                    </Badge>
+                    <Badge variant="outline" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold border-muted-foreground/20 text-muted-foreground/90">
+                        {plant.planting_place}
+                    </Badge>
+                </div>
+            </CardContent>
+        </Card>
+    );
+});
+
+const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onClick }: PlantItemProps) => {
+    return (
+        <TableRow
+            key={plant.id}
+            onClick={(e) => onClick(plant.id, e)}
+            className={cn(
+                "cursor-pointer select-none transition-colors",
+                isSelected ? 'bg-primary/5 hover:bg-primary/10' : ''
+            )}
+        >
+            <TableCell className="px-4">
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => { e.stopPropagation(); onSelect(plant.id); }}
+                    onClick={e => e.stopPropagation()}
+                    className="w-4 h-4 cursor-pointer accent-primary"
+                />
+            </TableCell>
+            <TableCell className="px-2">
+                {plant.icon_url
+                    ? <img src={plant.icon_url} alt="" className="w-8 h-8 object-cover rounded-md" />
+                    : <div className="w-8 h-8 bg-muted rounded-md flex items-center justify-center"><Leaf size={12} className="text-muted-foreground" /></div>
+                }
+            </TableCell>
+            <TableCell>
+                <div className="font-medium text-foreground text-sm">{plant.common_name}</div>
+                {plant.scientific_name && (
+                    <div className="italic text-muted-foreground text-xs mt-0.5 sm:hidden">{plant.scientific_name}</div>
+                )}
+            </TableCell>
+            <TableCell className="italic text-muted-foreground text-sm hidden sm:table-cell">{plant.scientific_name}</TableCell>
+            <TableCell className="hidden md:table-cell">
+                <Badge variant="secondary" className="text-[10px] uppercase tracking-wide font-bold">{plant.category}</Badge>
+            </TableCell>
+            <TableCell className="hidden md:table-cell">
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wide font-bold">{plant.planting_place}</Badge>
+            </TableCell>
+            <TableCell className="actions-menu-container" onClick={e => e.stopPropagation()}>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground"
+                        >
+                            <MoreVertical size={14} />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
+                            <FolderOpen className="mr-2 h-4 w-4" />
+                            <span>Add to Project</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onEdit(plant)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            <span>Edit</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => onDelete(plant.id, plant.common_name)}
+                        >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            <span>Delete</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </TableCell>
+        </TableRow>
+    );
+});
+
 export const PlantManager = () => {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
@@ -109,6 +297,12 @@ export const PlantManager = () => {
 
     const [showProjectModal, setShowProjectModal] = useState(false);
     const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+
+    const toggleSelection = useCallback((id: string) => {
+        setSelectedPlantIds(prev =>
+            prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
+        );
+    }, []);
 
     // Queries
     const searchParams = useSearch({ strict: false }) as { category?: string };
@@ -137,14 +331,14 @@ export const PlantManager = () => {
                             : filterOutdoor ? PlantingPlace.OUTDOOR
                             : undefined;
 
-    const plantsParams = {
+    const plantsParams = useMemo(() => ({
         skip: (currentPage - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
         search: debouncedSearch || undefined,
         category: filterCategory === '__all__' ? undefined : filterCategory,
         planting_place: plantingPlace,
         sort: sortOrder
-    };
+    }), [currentPage, PAGE_SIZE, debouncedSearch, filterCategory, plantingPlace, sortOrder]);
 
     const { data: plantsData, isLoading: plantsLoading } = useQuery(plantsQueryOptions(plantsParams));
 
@@ -156,13 +350,13 @@ export const PlantManager = () => {
     useEffect(() => {
         if (currentPage < totalPages) {
             const nextPage = currentPage + 1;
-            const nextParams = {
+            const nextPrefetchParams = {
                 ...plantsParams,
                 skip: (nextPage - 1) * PAGE_SIZE,
             };
-            queryClient.prefetchQuery(plantsQueryOptions(nextParams));
+            queryClient.prefetchQuery(plantsQueryOptions(nextPrefetchParams));
         }
-    }, [currentPage, totalPages, plantsParams, queryClient]);
+    }, [currentPage, totalPages, plantsParams, queryClient, PAGE_SIZE]);
 
     const { data: taxonomyTree } = useQuery(taxonomyTreeQueryOptions());
     const { data: categoriesOptions } = useQuery(categoriesQueryOptions());
@@ -354,16 +548,16 @@ export const PlantManager = () => {
         }
     });
 
-    const resetForm = () => {
+    const resetForm = useCallback(() => {
         setCommonName(''); setCategory(''); setIsIndoor(true); setIsOutdoor(true);
         setDescription(''); setCommonDiseases(''); setScientificName(''); setTaxonId(null);
         setIconFile(null); setImageFile(null); setIconUrl(''); setImageUrl('');
         setCareWater(''); setCareSunlight(''); setCareSoil(''); setCareMaintenance('');
         setIconPage(1);
         setMainImagePage(1);
-    };
+    }, []);
 
-    const handleEdit = (plant: Plant) => {
+    const handleEdit = useCallback((plant: Plant) => {
         setEditingPlantId(plant.id);
         setIsCreating(false);
         setCommonName(plant.common_name);
@@ -383,40 +577,40 @@ export const PlantManager = () => {
         setCareMaintenance(plant.care_data?.maintenance || '');
         setIconPage(1);
         setMainImagePage(1);
-    };
+    }, []);
 
-    const handleDelete = (id: string, name: string) => {
+    const handleDelete = useCallback((id: string, name: string) => {
         confirm({
             title: 'Delete Plant',
             message: `Are you sure you want to delete ${name}? This action cannot be undone.`,
             confirmText: 'Delete',
             onConfirm: () => deleteMutation.mutate(id),
         });
-    };
+    }, [confirm, deleteMutation]);
 
 
-    const handleRowClick = (id: string, e: React.MouseEvent) => {
+    const handleRowClick = useCallback((id: string, e: React.MouseEvent) => {
         if ((e.target as Element).closest('.actions-menu-container') ||
             (e.target as Element).closest('.dropdown-menu') ||
             (e.target as Element).tagName.toLowerCase() === 'input') return;
         navigate({ to: `/plants/${id}` as any });
-    };
+    }, [navigate]);
 
-    const openSingleProjectModal = (plantId: string) => {
+    const openSingleProjectModal = useCallback((plantId: string) => {
         setSelectedPlantIds([plantId]);
         setShowProjectModal(true);
-    };
+    }, []);
 
-    const cancelEdit = () => {
+    const cancelEdit = useCallback(() => {
         setEditingPlantId(null);
         setIsCreating(false);
         navigate({ to: '/plants', replace: true });
-    };
+    }, [navigate]);
 
-    const toggleCreate = () => {
+    const toggleCreate = useCallback(() => {
         if (isCreating || editingPlantId) { cancelEdit(); }
         else { setEditingPlantId(null); resetForm(); setIsCreating(true); }
-    };
+    }, [isCreating, editingPlantId, cancelEdit, resetForm]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -985,101 +1179,18 @@ export const PlantManager = () => {
                     ) : viewMode === 'card' ? (
                         /* Card grid */
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-                            {displayedPlants.map((plant: Plant) => {
-                                const isSelected = selectedPlantIds.includes(plant.id);
-                                const displayImage = plant.image_url || plant.icon_url;
-                                return (
-                                    <Card
-                                        key={plant.id}
-                                        onClick={(e) => handleRowClick(plant.id, e)}
-                                        className={`group relative overflow-hidden cursor-pointer select-none transition-all duration-200 hover:shadow-lg hover:-translate-y-1 bg-card border-border/60 ${isSelected ? 'ring-2 ring-primary border-primary' : ''}`}
-                                    >
-                                        {/* Image Header */}
-                                        <div className="relative aspect-video w-full bg-muted overflow-hidden">
-                                            {displayImage ? (
-                                                <img
-                                                    src={displayImage}
-                                                    alt={plant.common_name}
-                                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center">
-                                                    <Leaf size={32} className="text-muted-foreground/30" />
-                                                </div>
-                                            )}
-
-                                            {/* Selection Overlay */}
-                                            <div className="absolute top-2 left-2 z-10">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={(e) => { e.stopPropagation(); setSelectedPlantIds(prev => prev.includes(plant.id) ? prev.filter(p => p !== plant.id) : [...prev, plant.id]); }}
-                                                    onClick={e => e.stopPropagation()}
-                                                    className="w-5 h-5 cursor-pointer accent-primary rounded-md border-white/20 bg-black/20 backdrop-blur-sm"
-                                                />
-                                            </div>
-
-                                            {/* Actions Overlay */}
-                                            <div className="absolute top-2 right-2 z-10 actions-menu-container" onClick={e => e.stopPropagation()}>
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button
-                                                            variant="secondary"
-                                                            size="icon"
-                                                            className="h-8 w-8 rounded-full bg-black/20 hover:bg-black/40 border-0 text-white backdrop-blur-md shadow-sm"
-                                                        >
-                                                            <MoreVertical size={16} />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-40">
-                                                        <DropdownMenuItem onClick={() => openSingleProjectModal(plant.id)}>
-                                                            <FolderOpen className="mr-2 h-4 w-4" />
-                                                            <span>Add to Project</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleEdit(plant)}>
-                                                            <Pencil className="mr-2 h-4 w-4" />
-                                                            <span>Edit</span>
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                            className="text-destructive focus:text-destructive"
-                                                            onClick={() => handleDelete(plant.id, plant.common_name)}
-                                                            disabled={selectedPlantIds.length > 0}
-                                                        >
-                                                            <Trash2 className="mr-2 h-4 w-4" />
-                                                            <span>Delete</span>
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </div>
-
-                                            {/* Gradient Scrim */}
-                                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
-                                        </div>
-
-                                        <CardContent className="p-4 pt-3">
-                                            <div className="flex flex-col gap-1 mb-3">
-                                                <h3 className="font-semibold text-foreground text-sm tracking-tight leading-snug line-clamp-1">
-                                                    {plant.common_name}
-                                                </h3>
-                                                {plant.scientific_name && (
-                                                    <p className="text-xs italic text-muted-foreground/80 leading-tight line-clamp-1">
-                                                        {plant.scientific_name}
-                                                    </p>
-                                                )}
-                                            </div>
-
-                                            <div className="flex flex-wrap gap-1.5 mt-auto">
-                                                <Badge variant="secondary" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold bg-secondary/50 border-secondary/20">
-                                                    {plant.category}
-                                                </Badge>
-                                                <Badge variant="outline" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold border-muted-foreground/20 text-muted-foreground/90">
-                                                    {plant.planting_place}
-                                                </Badge>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                );
-                            })}
+                            {displayedPlants.map((plant: Plant) => (
+                                <PlantCardMemo
+                                    key={plant.id}
+                                    plant={plant}
+                                    isSelected={selectedPlantIds.includes(plant.id)}
+                                    onSelect={toggleSelection}
+                                    onEdit={handleEdit}
+                                    onDelete={handleDelete}
+                                    onAddToProject={openSingleProjectModal}
+                                    onClick={handleRowClick}
+                                />
+                            ))}
                         </div>
                     ) : (
                         /* Table / list view */
@@ -1130,76 +1241,18 @@ export const PlantManager = () => {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {displayedPlants.map((plant: Plant) => {
-                                        const isSelected = selectedPlantIds.includes(plant.id);
-                                        return (
-                                            <TableRow
-                                                key={plant.id}
-                                                onClick={(e) => handleRowClick(plant.id, e)}
-                                                className={`cursor-pointer select-none transition-colors ${isSelected ? 'bg-primary/5 hover:bg-primary/10' : ''}`}
-                                            >
-                                                <TableCell className="px-4">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={(e) => { e.stopPropagation(); setSelectedPlantIds(prev => prev.includes(plant.id) ? prev.filter(p => p !== plant.id) : [...prev, plant.id]); }}
-                                                        onClick={e => e.stopPropagation()}
-                                                        className="w-4 h-4 cursor-pointer accent-primary"
-                                                    />
-                                                </TableCell>
-                                                <TableCell className="px-2">
-                                                    {plant.icon_url
-                                                        ? <img src={plant.icon_url} alt="" className="w-8 h-8 object-cover rounded-md" />
-                                                        : <div className="w-8 h-8 bg-muted rounded-md flex items-center justify-center"><Leaf size={12} className="text-muted-foreground" /></div>
-                                                    }
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="font-medium text-foreground text-sm">{plant.common_name}</div>
-                                                    {plant.scientific_name && (
-                                                        <div className="italic text-muted-foreground text-xs mt-0.5 sm:hidden">{plant.scientific_name}</div>
-                                                    )}
-                                                </TableCell>
-                                                <TableCell className="italic text-muted-foreground text-sm hidden sm:table-cell">{plant.scientific_name}</TableCell>
-                                                <TableCell className="hidden md:table-cell">
-                                                    <Badge variant="secondary" className="text-[10px] uppercase tracking-wide font-bold">{plant.category}</Badge>
-                                                </TableCell>
-                                                <TableCell className="hidden md:table-cell">
-                                                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide font-bold">{plant.planting_place}</Badge>
-                                                </TableCell>
-                                                <TableCell className="actions-menu-container" onClick={e => e.stopPropagation()}>
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-7 w-7 text-muted-foreground"
-                                                            >
-                                                                <MoreVertical size={14} />
-                                                            </Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end" className="w-40">
-                                                            <DropdownMenuItem onClick={() => openSingleProjectModal(plant.id)}>
-                                                                <FolderOpen className="mr-2 h-4 w-4" />
-                                                                <span>Add to Project</span>
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuItem onClick={() => handleEdit(plant)}>
-                                                                <Pencil className="mr-2 h-4 w-4" />
-                                                                <span>Edit</span>
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuItem
-                                                                className="text-destructive focus:text-destructive"
-                                                                onClick={() => handleDelete(plant.id, plant.common_name)}
-                                                                disabled={selectedPlantIds.length > 0}
-                                                            >
-                                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                                <span>Delete</span>
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </TableCell>
-                                            </TableRow>
-                                        );
-                                    })}
+                                    {displayedPlants.map((plant: Plant) => (
+                                        <PlantTableRowMemo
+                                            key={plant.id}
+                                            plant={plant}
+                                            isSelected={selectedPlantIds.includes(plant.id)}
+                                            onSelect={toggleSelection}
+                                            onEdit={handleEdit}
+                                            onDelete={handleDelete}
+                                            onAddToProject={openSingleProjectModal}
+                                            onClick={handleRowClick}
+                                        />
+                                    ))}
                                 </TableBody>
                             </Table>
                         </Card>

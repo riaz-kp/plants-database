@@ -1,30 +1,15 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { RouterProvider } from '@tanstack/react-router';
 import { AlertProvider } from './contexts/AlertContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { routeTree } from './routeTree.gen';
+import { queryClient } from './api/queryClient';
+import { router } from './router';
 import './App.css';
-
-const queryClient = new QueryClient();
-
-const router = createRouter({
-  routeTree,
-  context: {
-    queryClient,
-    auth: undefined as any, // provided exactly by AuthProvider below
-  },
-});
-
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
 
 function InnerApp() {
   const auth = useAuth();
-  return <RouterProvider router={router} context={{ auth }} />;
+  return <RouterProvider router={router} context={{ auth, queryClient }} />;
 }
 
 function App() {

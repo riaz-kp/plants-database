@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { client } from '@/api/client';
+import { getInitialAuthState } from '@/api/auth';
 
 interface AuthContextType {
     isAuthenticated: boolean;
@@ -11,8 +12,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(getInitialAuthState());
+    const [isLoading, setIsLoading] = useState<boolean>(false);
 
     useEffect(() => {
         const token = localStorage.getItem('auth_token');

@@ -1,4 +1,3 @@
-// Polyfill Buffer for @react-pdf/renderer (uses Node.js Buffer internally)
 import { Buffer } from 'buffer';
 (window as any).Buffer = Buffer;
 

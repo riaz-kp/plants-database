@@ -189,3 +189,11 @@
     /* Firefox */
   }
 }
+  @keyframes progress-grow {
+    from { width: 0%; }
+    to { width: 100%; }
+  }
+
+  .animate-progress-grow {
+    animation: progress-grow 2s linear forwards;
+  }

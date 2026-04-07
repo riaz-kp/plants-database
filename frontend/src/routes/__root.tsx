@@ -1,7 +1,7 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
 import { QueryClient } from '@tanstack/react-query';
+import { AuthenticatedShell } from '@/components/layout/AuthenticatedShell';
 
-// Define the context we want to pass to our router
 export interface RouterContext {
   queryClient: QueryClient;
   auth: {
@@ -13,9 +13,17 @@ export interface RouterContext {
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  component: () => (
-    <>
-      <Outlet />
-    </>
-  ),
+  component: () => {
+    const { auth } = Route.useRouteContext();
+
+    if (auth.isAuthenticated) {
+      return <AuthenticatedShell />;
+    }
+
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-background">
+        <Outlet />
+      </div>
+    );
+  },
 });

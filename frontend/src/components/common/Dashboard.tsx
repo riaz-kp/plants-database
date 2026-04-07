@@ -1,7 +1,8 @@
-import { useSuspenseQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Leaf, ListTree, Tags, FolderKanban, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Skeleton } from '../ui/skeleton';
 import { dashboardQueryOptions } from '../../api/queryOptions';
 
 const StatCard = ({
@@ -10,12 +11,14 @@ const StatCard = ({
     icon: Icon,
     to,
     color,
+    isLoading
 }: {
     title: string;
     value?: number | string;
     icon: React.ElementType;
     to: string;
     color: string;
+    isLoading?: boolean;
 }) => (
     <Link to={to} className="group block">
         <Card className="border border-border hover:shadow-md transition-shadow duration-200">
@@ -27,7 +30,11 @@ const StatCard = ({
             </CardHeader>
             <CardContent>
                 <div className="text-3xl font-semibold tracking-tight text-foreground mb-1">
-                    {value ?? <span className="text-muted-foreground text-xl">—</span>}
+                    {isLoading ? (
+                        <Skeleton className="h-9 w-20" />
+                    ) : (
+                        value ?? <span className="text-muted-foreground text-xl">—</span>
+                    )}
                 </div>
                 <span className="text-xs text-muted-foreground group-hover:text-primary flex items-center gap-1 transition-colors">
                     View all <ArrowRight className="w-3 h-3" />
@@ -37,8 +44,10 @@ const StatCard = ({
     </Link>
 );
 
+
+
 export const Dashboard = () => {
-    const { data: stats } = useSuspenseQuery(dashboardQueryOptions());
+    const { data: stats, isLoading } = useQuery(dashboardQueryOptions());
 
     return (
         <div>
@@ -58,6 +67,7 @@ export const Dashboard = () => {
                     icon={Leaf}
                     to="/plants"
                     color="bg-primary"
+                    isLoading={isLoading}
                 />
                 <StatCard
                     title="Taxonomy Nodes"
@@ -65,6 +75,7 @@ export const Dashboard = () => {
                     icon={ListTree}
                     to="/taxonomy"
                     color="bg-secondary"
+                    isLoading={isLoading}
                 />
                 <StatCard
                     title="Categories"
@@ -72,6 +83,7 @@ export const Dashboard = () => {
                     icon={Tags}
                     to="/categories"
                     color="bg-accent"
+                    isLoading={isLoading}
                 />
                 <StatCard
                     title="Projects"
@@ -79,6 +91,7 @@ export const Dashboard = () => {
                     icon={FolderKanban}
                     to="/projects"
                     color="bg-primary"
+                    isLoading={isLoading}
                 />
             </div>
 

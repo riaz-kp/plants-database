@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, memo, useCallback } from 'react';
 import { useParams, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,7 +15,6 @@ import { taxonomyApi } from '../../api/taxonomy';
 import type { ProjectPlantCreate } from '../../types/project';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
-import { ProjectPdfContainer } from './ProjectPdfDocument';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,6 +74,131 @@ function SortTh({
     );
 }
 
+
+/* ─── Memoized Row ─── */
+interface ProjectPlantRowProps {
+    pp: any;
+    idx: number;
+    safePage: number;
+    pageSize: number;
+    onEdit: (plantId: string, notes: string) => void;
+    onDelete: (plantId: string, plantName: string) => void;
+}
+
+const ProjectPlantRowMemo = memo(({ pp, idx, safePage, pageSize, onEdit, onDelete }: ProjectPlantRowProps) => {
+    return (
+        <TableRow key={pp.plant_id} className="hover:bg-muted/20 transition-colors">
+            {/* # */}
+            <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
+                {(safePage - 1) * pageSize + idx + 1}
+            </TableCell>
+
+            {/* Plant */}
+            <TableCell>
+                <div className="flex items-center gap-3">
+                    {/* Icon/Image */}
+                    <div className="shrink-0">
+                        {pp.plant?.icon_url ? (
+                            <img
+                                src={pp.plant.icon_url}
+                                alt=""
+                                className="w-10 h-10 object-cover rounded-lg border border-border/50"
+                            />
+                        ) : (
+                            <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center border border-border/50 shadow-sm">
+                                <Leaf size={16} className="text-muted-foreground/50" />
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                        <Link
+                            to="/plants/$id"
+                            params={{ id: pp.plant_id }}
+                            className="group/plant inline-flex items-start gap-1 font-medium text-foreground hover:text-primary transition-colors leading-tight"
+                        >
+                            <span className="truncate">{pp.plant?.common_name}</span>
+                            <ExternalLink className="w-3 h-3 mt-0.5 shrink-0 opacity-0 group-hover/plant:opacity-50 transition-opacity" />
+                        </Link>
+
+                        {/* Mobile details: Scientific + Category */}
+                        <div className="flex flex-col gap-1 mt-1 sm:hidden">
+                            <p className="text-xs text-muted-foreground italic truncate">
+                                {pp.plant?.scientific_name || pp.plant?.taxon?.name || 'Unknown species'}
+                            </p>
+                            {pp.plant?.category && (
+                                <div>
+                                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0">
+                                        {pp.plant.category}
+                                    </Badge>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Desktop scientific fallback */}
+                        <p className="hidden sm:block text-xs text-muted-foreground italic truncate md:hidden">
+                            {pp.plant?.scientific_name || pp.plant?.taxon?.name}
+                        </p>
+                    </div>
+                </div>
+
+                {/* notes on mobile */}
+                {pp.notes && (
+                    <p className="text-xs text-muted-foreground mt-2 md:hidden pl-[52px]">
+                        {pp.notes}
+                    </p>
+                )}
+            </TableCell>
+
+            {/* Scientific */}
+            <TableCell className="hidden sm:table-cell text-xs text-muted-foreground italic">
+                {pp.plant?.scientific_name || pp.plant?.taxon?.name || <span className="opacity-30">—</span>}
+            </TableCell>
+
+            {/* Category */}
+            <TableCell className="hidden md:table-cell">
+                {pp.plant?.category
+                    ? <Badge variant="outline" className="text-xs">{pp.plant.category}</Badge>
+                    : <span className="text-muted-foreground/40 text-sm">—</span>}
+            </TableCell>
+
+            {/* Place */}
+            <TableCell className="hidden lg:table-cell">
+                {pp.plant?.planting_place
+                    ? <Badge variant="secondary" className="text-xs">{pp.plant.planting_place}</Badge>
+                    : <span className="text-muted-foreground/40 text-sm">—</span>}
+            </TableCell>
+
+            {/* Notes */}
+            <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[180px] truncate">
+                {pp.notes || <span className="opacity-30">—</span>}
+            </TableCell>
+
+            {/* Actions */}
+            <TableCell className="text-right">
+                <div className="flex items-center justify-end gap-1">
+                    <Button
+                        variant="ghost" size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => onEdit(pp.plant_id, pp.notes || '')}
+                        title="Edit notes"
+                    >
+                        <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost" size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => onDelete(pp.plant_id, pp.plant?.common_name || 'Plant')}
+                        title="Remove plant"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                </div>
+            </TableCell>
+        </TableRow>
+    );
+});
+
 export const ProjectDetails = () => {
     const { id } = useParams({ strict: false }) as { id: string };
     const queryClient = useQueryClient();
@@ -96,7 +220,6 @@ export const ProjectDetails = () => {
     const [pageSize, setPageSize] = useState(10);
 
     const [pdfLoading, setPdfLoading] = useState(false);
-    const [pdfReady, setPdfReady] = useState(false);
 
     /* ── Share link state ── */
     const [shareLink, setShareLink] = useState<ShareLinkInfo | null>(null);
@@ -150,11 +273,11 @@ export const ProjectDetails = () => {
         if (!project) return;
         setPdfLoading(true);
         try {
-            // Fires the custom event that ProjectPdfContainer listens to,
-            // which uses @react-pdf/renderer to generate a real vector PDF.
-            window.dispatchEvent(
-                new CustomEvent('trigger-pdf-export', { detail: { filename: project.name } })
-            );
+            const { prepareProjectImageCache } = await import('../../utils/pdf-images');
+            const imgCache = await prepareProjectImageCache(project);
+            
+            const { exportProjectPdfNew } = await import('./ProjectPdfDocument');
+            await exportProjectPdfNew(project, taxTree, imgCache, project.name);
         } catch (e) {
             console.error(e);
             showAlert('PDF export failed', 'error');
@@ -183,13 +306,13 @@ export const ProjectDetails = () => {
     });
 
     /* ── Dialog helpers ── */
-    const openAdd = () => { setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); setIsDialogOpen(true); };
-    const openEdit = (plantId: string, currentNotes: string) => { setEditingPlantId(plantId); setSelectedPlantId(plantId); setNotes(currentNotes); setIsDialogOpen(true); };
-    const closeDialog = () => { setIsDialogOpen(false); setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); };
+    const openAdd = useCallback(() => { setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); setIsDialogOpen(true); }, []);
+    const openEdit = useCallback((plantId: string, currentNotes: string) => { setEditingPlantId(plantId); setSelectedPlantId(plantId); setNotes(currentNotes); setIsDialogOpen(true); }, []);
+    const closeDialog = useCallback(() => { setIsDialogOpen(false); setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); }, []);
 
-    const handleDeletePlant = (plantId: string, plantName: string) => {
+    const handleDeletePlant = useCallback((plantId: string, plantName: string) => {
         confirm({ title: 'Remove Plant', message: `Remove "${plantName}" from this project?`, confirmText: 'Remove', cancelText: 'Cancel', onConfirm: () => deletePlantMutation.mutate(plantId) });
-    };
+    }, [confirm, deletePlantMutation]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -201,11 +324,17 @@ export const ProjectDetails = () => {
     const isSaving = addPlantMutation.isPending || updatePlantMutation.isPending;
 
     /* ── Sort handler ── */
-    const handleSort = (col: SortKey) => {
-        if (sortKey === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-        else { setSortKey(col); setSortDir('asc'); }
+    const handleSort = useCallback((col: SortKey) => {
+        setSortKey(prevKey => {
+            if (prevKey === col) {
+                setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                return prevKey;
+            }
+            setSortDir('asc');
+            return col;
+        });
         setPage(1);
-    };
+    }, []);
 
     /* ── Derived data ── */
     const uniqueCategories = useMemo(() => {
@@ -333,10 +462,10 @@ export const ProjectDetails = () => {
                             variant="outline" size="sm"
                             className="h-9"
                             onClick={handleDownloadPdf}
-                            disabled={pdfLoading || !pdfReady}
+                            disabled={pdfLoading}
                         >
                             <Download className="w-4 h-4 mr-2" />
-                            {pdfLoading ? 'Generating PDF…' : !pdfReady ? 'Preparing…' : 'Download PDF'}
+                            {pdfLoading ? 'Generating PDF…' : 'Download PDF'}
                         </Button>
                     </div>
                 </div>
@@ -432,115 +561,15 @@ export const ProjectDetails = () => {
                                         </TableRow>
                                     ) : (
                                         pageSlice.map((pp, idx) => (
-                                            <TableRow key={pp.plant_id} className="hover:bg-muted/20 transition-colors">
-                                                {/* # */}
-                                                <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
-                                                    {(safePage - 1) * pageSize + idx + 1}
-                                                </TableCell>
-
-                                                {/* Plant */}
-                                                <TableCell>
-                                                    <div className="flex items-center gap-3">
-                                                        {/* Icon/Image */}
-                                                        <div className="shrink-0">
-                                                            {pp.plant?.icon_url ? (
-                                                                <img
-                                                                    src={pp.plant.icon_url}
-                                                                    alt=""
-                                                                    className="w-10 h-10 object-cover rounded-lg border border-border/50"
-                                                                />
-                                                            ) : (
-                                                                <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center border border-border/50 shadow-sm">
-                                                                    <Leaf size={16} className="text-muted-foreground/50" />
-                                                                </div>
-                                                            )}
-                                                        </div>
-
-                                                        <div className="flex-1 min-w-0">
-                                                            <Link
-                                                                to="/plants/$id"
-                                                                params={{ id: pp.plant_id }}
-                                                                className="group/plant inline-flex items-start gap-1 font-medium text-foreground hover:text-primary transition-colors leading-tight"
-                                                            >
-                                                                <span className="truncate">{pp.plant?.common_name}</span>
-                                                                <ExternalLink className="w-3 h-3 mt-0.5 shrink-0 opacity-0 group-hover/plant:opacity-50 transition-opacity" />
-                                                            </Link>
-
-                                                            {/* Mobile details: Scientific + Category */}
-                                                            <div className="flex flex-col gap-1 mt-1 sm:hidden">
-                                                                <p className="text-xs text-muted-foreground italic truncate">
-                                                                    {pp.plant?.scientific_name || pp.plant?.taxon?.name || 'Unknown species'}
-                                                                </p>
-                                                                {pp.plant?.category && (
-                                                                    <div>
-                                                                        <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0">
-                                                                            {pp.plant.category}
-                                                                        </Badge>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Desktop scientific fallback for very small sm screens if needed */}
-                                                            <p className="hidden sm:block text-xs text-muted-foreground italic truncate md:hidden">
-                                                                {pp.plant?.scientific_name || pp.plant?.taxon?.name}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* notes on mobile */}
-                                                    {pp.notes && (
-                                                        <p className="text-xs text-muted-foreground mt-2 md:hidden pl-[52px]">
-                                                            {pp.notes}
-                                                        </p>
-                                                    )}
-                                                </TableCell>
-
-                                                {/* Scientific */}
-                                                <TableCell className="hidden sm:table-cell text-xs text-muted-foreground italic">
-                                                    {pp.plant?.scientific_name || pp.plant?.taxon?.name || <span className="opacity-30">—</span>}
-                                                </TableCell>
-
-                                                {/* Category */}
-                                                <TableCell className="hidden md:table-cell">
-                                                    {pp.plant?.category
-                                                        ? <Badge variant="outline" className="text-xs">{pp.plant.category}</Badge>
-                                                        : <span className="text-muted-foreground/40 text-sm">—</span>}
-                                                </TableCell>
-
-                                                {/* Place */}
-                                                <TableCell className="hidden lg:table-cell">
-                                                    {pp.plant?.planting_place
-                                                        ? <Badge variant="secondary" className="text-xs">{pp.plant.planting_place}</Badge>
-                                                        : <span className="text-muted-foreground/40 text-sm">—</span>}
-                                                </TableCell>
-
-                                                {/* Notes */}
-                                                <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[180px] truncate">
-                                                    {pp.notes || <span className="opacity-30">—</span>}
-                                                </TableCell>
-
-                                                {/* Actions */}
-                                                <TableCell className="text-right">
-                                                    <div className="flex items-center justify-end gap-1">
-                                                        <Button
-                                                            variant="ghost" size="icon"
-                                                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                                            onClick={() => openEdit(pp.plant_id, pp.notes || '')}
-                                                            title="Edit notes"
-                                                        >
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost" size="icon"
-                                                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                                            onClick={() => handleDeletePlant(pp.plant_id, pp.plant?.common_name || 'Plant')}
-                                                            title="Remove plant"
-                                                        >
-                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                        </Button>
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
+                                            <ProjectPlantRowMemo
+                                                key={pp.plant_id}
+                                                pp={pp}
+                                                idx={idx}
+                                                safePage={safePage}
+                                                pageSize={pageSize}
+                                                onEdit={openEdit}
+                                                onDelete={handleDeletePlant}
+                                            />
                                         ))
                                     )}
                                 </TableBody>
@@ -639,15 +668,6 @@ export const ProjectDetails = () => {
                 </DialogContent>
             </Dialog>
 
-            {/* Hidden PDF render targets — one cover + one per plant */}
-            {project && (
-                <ProjectPdfContainer
-                    project={project}
-                    taxTree={taxTree}
-                    projectId={id!}
-                    onReady={() => setPdfReady(true)}
-                />
-            )}
         </div>
     );
 };

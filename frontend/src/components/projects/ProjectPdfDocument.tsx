@@ -7,7 +7,6 @@
  * - Layout matches the original design
  */
 
-import { useEffect, useState } from 'react';
 import {
     Document,
     Page,
@@ -23,10 +22,6 @@ import {
 } from '@react-pdf/renderer';
 import type { Project } from '../../types/project';
 import type { TaxonTree } from '../../types/taxon';
-
-// ─── Register fonts ───────────────────────────────────────────────────────────
-// Using built-in Helvetica so no external font download is needed.
-// If you have Inter woff2 hosted, you can register it here instead.
 
 // ─── Brand palette ────────────────────────────────────────────────────────────
 const C = {
@@ -70,36 +65,6 @@ function getTaxPath(nodes: TaxonTree[], id: string, path: TaxonTree[] = []): Tax
     return null;
 }
 
-const API_BASE = 'http://localhost:8000/api/v1';
-
-async function imgToDataUrl(url: string | null | undefined): Promise<string | null> {
-    if (!url) return null;
-    try {
-        const proxyUrl = `${API_BASE}/proxy/image?url=${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
-        if (res.ok) {
-            const blob = await res.blob();
-            return await blobToDataUrl(blob);
-        }
-    } catch { /* fall through */ }
-    try {
-        const res = await fetch(url, { mode: 'cors' });
-        if (res.ok) {
-            const blob = await res.blob();
-            return await blobToDataUrl(blob);
-        }
-    } catch { /* fall through */ }
-    return null;
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-    return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onloadend = () => res(r.result as string);
-        r.onerror = () => rej(null);
-        r.readAsDataURL(blob);
-    });
-}
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const I = {
     Water: () => (
@@ -148,6 +113,7 @@ const I = {
         </Svg>
     )
 };
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
     page: {
@@ -157,8 +123,6 @@ const s = StyleSheet.create({
         fontFamily: 'Helvetica',
         color: C.dark,
     },
-
-    // ── Cover ──
     coverTitle: { fontSize: 32, fontFamily: 'Helvetica-Bold', color: C.dark, marginBottom: 8, letterSpacing: -0.8 },
     coverMeta: { flexDirection: 'row', gap: 24, marginBottom: 6 },
     coverMetaText: { fontSize: 11, color: C.mutedFg },
@@ -166,8 +130,6 @@ const s = StyleSheet.create({
     coverDesc: { fontSize: 11, color: C.mutedFg, lineHeight: 1.6, marginTop: 4, maxWidth: '85%' },
     divider: { borderBottomWidth: 1.5, borderBottomColor: C.primary, marginVertical: 20 },
     sectionTitle: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: C.primary, marginBottom: 12, letterSpacing: -0.4 },
-
-    // ── Table ──
     tableHead: { flexDirection: 'row', backgroundColor: C.mutedBg, borderBottomWidth: 1.5, borderBottomColor: C.primary, alignItems: 'center' },
     th: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.primary, textTransform: 'uppercase', letterSpacing: 0.8, paddingVertical: 8, paddingHorizontal: 8 },
     catRow: { paddingVertical: 10, paddingBottom: 4, borderLeftWidth: 4, borderLeftColor: C.primary, paddingLeft: 10, marginTop: 12 },
@@ -177,8 +139,6 @@ const s = StyleSheet.create({
     tdMuted: { fontSize: 10.5, color: C.mutedFg, paddingVertical: 8, paddingHorizontal: 8 },
     pill: { backgroundColor: C.mutedBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 0.5, borderColor: C.border, alignSelf: 'flex-start' },
     pillText: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.mutedFg, textTransform: 'uppercase', letterSpacing: 0.6 },
-
-    // ── Plant page ──
     plantPage: {
         backgroundColor: C.bg,
         paddingHorizontal: 40,
@@ -229,13 +189,10 @@ function CoverPage({ project, imgCache }: CoverProps) {
         groups.get(cat)!.push(pp);
     }
     let serial = 0;
-
-    // Column widths (sum = 100%)
     const COL = { num: '6%', name: '28%', sci: '24%', place: '16%', notes: '26%' };
 
     return (
         <Page size="A4" style={s.page} wrap>
-            {/* Header */}
             <Text style={s.coverTitle}>{project.name}</Text>
             <View style={s.coverMeta}>
                 {project.client_name && (
@@ -255,7 +212,6 @@ function CoverPage({ project, imgCache }: CoverProps) {
             <View style={s.divider} />
             <Text style={s.sectionTitle}>Project Inventory</Text>
 
-            {/* Table header */}
             <View style={s.tableHead}>
                 <Text style={[s.th, { width: COL.num, textAlign: 'center' }]}>#</Text>
                 <Text style={[s.th, { width: COL.name }]}>Plant</Text>
@@ -264,10 +220,8 @@ function CoverPage({ project, imgCache }: CoverProps) {
                 <Text style={[s.th, { width: COL.notes }]}>Notes</Text>
             </View>
 
-            {/* Rows */}
             {Array.from(groups.entries()).map(([cat, pps]) => (
                 <View key={cat}>
-                    {/* Category heading */}
                     <View style={{ paddingVertical: 6, paddingBottom: 2 }}>
                         <View style={s.catRow}>
                             <Text style={s.catLabel}>{cat}</Text>
@@ -284,10 +238,7 @@ function CoverPage({ project, imgCache }: CoverProps) {
 
                         return (
                             <View key={pp.plant_id} style={[s.tableRow, { backgroundColor: rowBg, minHeight: 40 }]}>
-                                {/* # */}
                                 <Text style={[s.tdMuted, { width: COL.num, textAlign: 'center', fontSize: 9.5, color: C.dark }]}>{serial}</Text>
-
-                                {/* Plant name + icon */}
                                 <Link
                                     src={`#plant-${p.id}`}
                                     style={{
@@ -307,13 +258,9 @@ function CoverPage({ project, imgCache }: CoverProps) {
                                         {p.common_name}
                                     </Text>
                                 </Link>
-
-                                {/* Scientific */}
                                 <Text style={[s.tdMuted, { width: COL.sci, fontSize: 9.5 }]}>
                                     {p.scientific_name || p.taxon?.name || '—'}
                                 </Text>
-
-                                {/* Placement */}
                                 <View style={{ width: COL.place, paddingVertical: 5, paddingHorizontal: 6 }}>
                                     {cleaningPlace(p.planting_place) && (
                                         <View style={s.pill}>
@@ -323,8 +270,6 @@ function CoverPage({ project, imgCache }: CoverProps) {
                                         </View>
                                     )}
                                 </View>
-
-                                {/* Notes */}
                                 <Text style={[s.tdMuted, { width: COL.notes, fontSize: 9.5 }]}>{pp.notes || '—'}</Text>
                             </View>
                         );
@@ -354,7 +299,6 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
 
     return (
         <Page size="A4" style={s.plantPage}>
-            {/* Header */}
             <View style={s.header} id={`plant-${p.id}`}>
                 <View style={s.headerLeft}>
                     <View style={s.nameRow}>
@@ -366,8 +310,6 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
                             </Text>
                         </View>
                     </View>
-
-                    {/* Pills */}
                     <View style={s.pillsRow}>
                         {p.category && (
                             <View style={s.pill}>
@@ -382,21 +324,14 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
                             </View>
                         )}
                     </View>
-
-
                 </View>
-
-                {/* Hero image */}
                 {heroSrc && <Image src={heroSrc} style={s.heroImg} />}
             </View>
 
             <View style={s.dividerThin} />
 
-            {/* Body grid */}
             <View style={s.bodyGrid}>
-                {/* Main column */}
                 <View style={s.mainCol}>
-                    {/* Description */}
                     <View style={[s.card, { flex: 1 }]}>
                         <View style={s.cardTitle}>
                             <View style={{ paddingTop: 3 }}><I.Desc /></View>
@@ -407,7 +342,6 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
                         </Text>
                     </View>
 
-                    {/* Care data */}
                     {careEntries.length > 0 && (
                         <View style={s.card}>
                             <View style={s.cardTitle}>
@@ -439,9 +373,7 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
                     )}
                 </View>
 
-                {/* Side column */}
                 <View style={s.sideCol}>
-                    {/* Diseases */}
                     {p.common_diseases && (
                         <View style={s.redCard}>
                             <View style={[s.cardTitle, { borderBottomColor: C.redBorder }]}>
@@ -452,7 +384,6 @@ function PlantDetailPage({ pp, taxTree, imgCache }: PlantPageProps) {
                         </View>
                     )}
 
-                    {/* Taxonomy */}
                     {taxPath && taxPath.length > 0 && (
                         <View style={[s.card, { flex: 1 }]}>
                             <View style={s.cardTitle}>
@@ -508,62 +439,5 @@ export async function exportProjectPdfNew(
     a.download = `${filename}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
-}
-
-// ─── CONTAINER (manages image caching + triggers export) ──────────────────────
-interface ContainerProps {
-    project: Project;
-    taxTree: TaxonTree[] | null | undefined;
-    projectId: string;
-    onReady?: () => void;
-}
-
-/**
- * Kept as a passthrough component so ProjectDetails.tsx still renders it.
- * It pre-loads images into the cache and signals readiness.
- */
-export function ProjectPdfContainer({ project, taxTree, projectId: _projectId, onReady }: ContainerProps) {
-    const [imgCache, setImgCache] = useState<Record<string, string>>({});
-
-    useEffect(() => {
-        if (!project?.plants?.length) { onReady?.(); return; }
-
-        const urls: Array<{ key: string; url: string }> = [];
-        for (const pp of project.plants) {
-            const p = pp.plant;
-            if (!p) continue;
-            if (p.icon_url) {
-                urls.push({ key: p.id, url: p.icon_url });
-                urls.push({ key: `icon_${p.id}`, url: p.icon_url });
-            }
-            if (p.image_url) {
-                urls.push({ key: `hero_${p.id}`, url: p.image_url });
-            }
-        }
-
-        Promise.all(
-            urls.map(({ key, url }) => imgToDataUrl(url).then(data => ({ key, data })))
-        ).then(results => {
-            const cache: Record<string, string> = {};
-            for (const { key, data } of results) {
-                if (data) cache[key] = data;
-            }
-            setImgCache(cache);
-            onReady?.();
-        });
-    }, [project]);
-
-    // Store cache on a ref accessible by the export trigger
-    // We expose the generate function through a custom event so ProjectDetails
-    // doesn't need a major refactor.
-    useEffect(() => {
-        const handler = async (e: Event) => {
-            const { filename } = (e as CustomEvent).detail;
-            await exportProjectPdfNew(project, taxTree, imgCache, filename);
-        };
-        window.addEventListener('trigger-pdf-export', handler);
-        return () => window.removeEventListener('trigger-pdf-export', handler);
-    }, [project, taxTree, imgCache]);
-
-    return null; // No DOM output needed
+    a.remove();
 }

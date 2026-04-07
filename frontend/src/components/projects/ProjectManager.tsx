@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, memo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
@@ -50,11 +50,141 @@ import {
 } from '@/components/ui/table';
 
 
-/* ─── helpers ─── */
+
+/* ─── Memoized Items ─── */
+interface ProjectItemProps {
+    project: Project;
+    onEdit: (project: Project) => void;
+    onDelete: (id: string, name: string) => void;
+    onDuplicate: (id: string) => void;
+}
+
 const formatDate = (dateString: string) =>
     new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' }).format(
         new Date(dateString),
     );
+
+const ActionsMenu = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectItemProps) => (
+    <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+            <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+            >
+                <MoreVertical className="w-4 h-4" />
+            </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(project); }}>
+                <Pencil className="w-4 h-4 mr-2" /> Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDuplicate(project.id); }}>
+                <Copy className="w-4 h-4 mr-2" /> Duplicate
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(project.id, project.name); }}
+            >
+                <Trash2 className="w-4 h-4 mr-2" /> Delete
+            </DropdownMenuItem>
+        </DropdownMenuContent>
+    </DropdownMenu>
+));
+
+const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectItemProps) => {
+    return (
+        <div className="group relative rounded-xl border border-border bg-white shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 flex flex-col overflow-hidden">
+            {/* Direct Link Overlay to avoid nesting interactive elements */}
+            <Link
+                key={project.id}
+                to={`/projects/${project.id}` as any}
+                className="absolute inset-0 z-0"
+                aria-label={`View ${project.name}`}
+            />
+            <div className="relative z-10 flex flex-col h-full pointer-events-none">
+                <div className="flex items-start justify-between p-5 pb-3">
+                    <h3 className="font-semibold text-foreground text-base leading-snug group-hover:text-primary transition-colors pr-2 text-balance">
+                        {project.name}
+                    </h3>
+                    <div className="shrink-0 pointer-events-auto">
+                        <ActionsMenu project={project} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
+                    </div>
+                </div>
+                <div className="px-5 pb-5 flex flex-col gap-2 flex-1">
+                    <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+                        {project.client_name && (
+                            <span className="flex items-center gap-1.5">
+                                <User className="w-3.5 h-3.5 shrink-0" /> {project.client_name}
+                            </span>
+                        )}
+                        {project.location && (
+                            <span className="flex items-center gap-1.5">
+                                <MapPin className="w-3.5 h-3.5 shrink-0" /> {project.location}
+                            </span>
+                        )}
+                    </div>
+                    {project.description && (
+                        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-1">
+                            {project.description}
+                        </p>
+                    )}
+                    <div className="flex items-center justify-between mt-auto pt-3 border-t border-border">
+                        <Badge variant="secondary" className="text-xs font-medium">
+                            <Leaf className="w-3 h-3 mr-1" />
+                            {project.plants?.length ?? 0} {project.plants?.length === 1 ? 'plant' : 'plants'}
+                        </Badge>
+                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <CalendarDays className="w-3 h-3" />
+                            {formatDate(project.updated_at || project.created_at)}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectItemProps) => {
+    return (
+        <TableRow key={project.id} className="hover:bg-muted/30 transition-colors group">
+            <TableCell>
+                <Link
+                    to={`/projects/${project.id}` as any}
+                    className="font-medium text-foreground hover:text-primary flex items-center gap-1 transition-colors"
+                >
+                    {project.name}
+                    <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
+                {project.client_name && (
+                    <p className="text-xs text-muted-foreground mt-0.5 md:hidden">{project.client_name}</p>
+                )}
+            </TableCell>
+            <TableCell className="text-muted-foreground hidden md:table-cell">
+                {project.client_name || <span className="opacity-40">—</span>}
+            </TableCell>
+            <TableCell className="text-muted-foreground hidden lg:table-cell">
+                {project.location || <span className="opacity-40">—</span>}
+            </TableCell>
+            <TableCell className="text-muted-foreground text-sm hidden sm:table-cell text-nowrap">
+                {formatDate(project.updated_at || project.created_at)}
+            </TableCell>
+            <TableCell>
+                <Badge variant="secondary" className="tabular-nums">
+                    {project.plants?.length ?? 0}
+                </Badge>
+            </TableCell>
+            <TableCell>
+                <ActionsMenu project={project} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
+            </TableCell>
+        </TableRow>
+    );
+});
 
 /* ─── ProjectManager ─────────────────────────────────────── */
 export const ProjectManager = () => {
@@ -83,12 +213,12 @@ export const ProjectManager = () => {
     const [location, setLocation] = useState('');
     const [description, setDescription] = useState('');
 
-    const projectsParams = {
+    const projectsParams = useMemo(() => ({
         skip: (currentPage - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
         search: debouncedSearch || undefined,
         sort: sortBy
-    };
+    }), [currentPage, debouncedSearch, sortBy]);
 
     const { data: projectsData, isLoading } = useQuery(projectsQueryOptions(projectsParams));
 
@@ -159,28 +289,30 @@ export const ProjectManager = () => {
         },
     });
 
-    const openCreate = () => {
+    const handleDuplicate = useCallback((id: string) => duplicateMutation.mutate(id), [duplicateMutation]);
+
+    const openCreate = useCallback(() => {
         setEditingProject(null);
         setName(''); setClientName(''); setLocation(''); setDescription('');
         setIsDialogOpen(true);
-    };
+    }, []);
 
-    const openEdit = (project: Project) => {
+    const openEdit = useCallback((project: Project) => {
         setEditingProject(project);
         setName(project.name);
         setClientName(project.client_name || '');
         setLocation(project.location || '');
         setDescription(project.description || '');
         setIsDialogOpen(true);
-    };
+    }, []);
 
-    const closeDialog = () => {
+    const closeDialog = useCallback(() => {
         setIsDialogOpen(false);
         setEditingProject(null);
         setName(''); setClientName(''); setLocation(''); setDescription('');
-    };
+    }, []);
 
-    const handleDelete = (id: string, projectName: string) => {
+    const handleDelete = useCallback((id: string, projectName: string) => {
         confirm({
             title: 'Delete Project',
             message: `Are you sure you want to delete "${projectName}"? All associated plant records will be removed.`,
@@ -188,7 +320,7 @@ export const ProjectManager = () => {
             cancelText: 'Cancel',
             onConfirm: () => deleteMutation.mutate(id),
         });
-    };
+    }, [confirm, deleteMutation]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -203,32 +335,6 @@ export const ProjectManager = () => {
     const isSaving = createMutation.isPending || updateMutation.isPending;
 
     const displayedProjects = projects;
-
-    /* ── Actions Menu ── */
-    const ActionsMenu = ({ project }: { project: Project }) => (
-        <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.preventDefault()}>
-                    <MoreVertical className="w-4 h-4" />
-                </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={(e) => { e.preventDefault(); openEdit(project); }}>
-                    <Pencil className="w-4 h-4 mr-2" /> Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={(e) => { e.preventDefault(); duplicateMutation.mutate(project.id); }}>
-                    <Copy className="w-4 h-4 mr-2" /> Duplicate
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onClick={(e) => { e.preventDefault(); handleDelete(project.id, project.name); }}
-                >
-                    <Trash2 className="w-4 h-4 mr-2" /> Delete
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
 
     return (
         <div>
@@ -309,98 +415,38 @@ export const ProjectManager = () => {
                 /* ── Card Grid ── */
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                     {displayedProjects.map((project) => (
-                        <Link
+                        <ProjectCardMemo
                             key={project.id}
-                            to={`/projects/${project.id}` as any}
-                            className="group relative rounded-xl border border-border bg-white shadow-sm hover:shadow-md hover:border-primary/30 transition-all duration-200 flex flex-col overflow-hidden"
-                        >
-                            <div className="flex items-start justify-between p-5 pb-3">
-                                <h3 className="font-semibold text-foreground text-base leading-snug group-hover:text-primary transition-colors pr-2">
-                                    {project.name}
-                                </h3>
-                                <div className="shrink-0" onClick={(e) => e.preventDefault()}>
-                                    <ActionsMenu project={project} />
-                                </div>
-                            </div>
-                            <div className="px-5 pb-5 flex flex-col gap-2 flex-1">
-                                <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-                                    {project.client_name && (
-                                        <span className="flex items-center gap-1.5">
-                                            <User className="w-3.5 h-3.5 shrink-0" /> {project.client_name}
-                                        </span>
-                                    )}
-                                    {project.location && (
-                                        <span className="flex items-center gap-1.5">
-                                            <MapPin className="w-3.5 h-3.5 shrink-0" /> {project.location}
-                                        </span>
-                                    )}
-                                </div>
-                                {project.description && (
-                                    <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-1">
-                                        {project.description}
-                                    </p>
-                                )}
-                                <div className="flex items-center justify-between mt-auto pt-3 border-t border-border">
-                                    <Badge variant="secondary" className="text-xs font-medium">
-                                        <Leaf className="w-3 h-3 mr-1" />
-                                        {project.plants?.length ?? 0} plants
-                                    </Badge>
-                                    <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                                        <CalendarDays className="w-3 h-3" />
-                                        {formatDate(project.updated_at || project.created_at)}
-                                    </span>
-                                </div>
-                            </div>
-                        </Link>
+                            project={project}
+                            onEdit={openEdit}
+                            onDelete={handleDelete}
+                            onDuplicate={handleDuplicate}
+                        />
                     ))}
                 </div>
             ) : (
                 /* ── Table View ── */
-                <div className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
+                <div className="rounded-xl border border-border bg-white shadow-sm overflow-hidden text-balance">
                     <Table>
                         <TableHeader>
-                            <TableRow className="bg-muted/40">
+                            <TableRow className="bg-muted/40 text-balance">
                                 <TableHead className="font-semibold">Name</TableHead>
                                 <TableHead className="font-semibold hidden md:table-cell">Client</TableHead>
-                                <TableHead className="font-semibold hidden lg:table-cell">Location</TableHead>
+                                <TableHead className="font-semibold hidden lg:table-cell text-balance">Location</TableHead>
                                 <TableHead className="font-semibold hidden sm:table-cell">Updated</TableHead>
                                 <TableHead className="font-semibold">Plants</TableHead>
-                                <TableHead className="w-10" />
+                                <TableHead className="w-10 px-0" />
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {displayedProjects.map((project) => (
-                                <TableRow key={project.id} className="hover:bg-muted/30 transition-colors group">
-                                    <TableCell>
-                                        <Link
-                                            to={`/projects/${project.id}` as any}
-                                            className="font-medium text-foreground hover:text-primary flex items-center gap-1 transition-colors"
-                                        >
-                                            {project.name}
-                                            <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        </Link>
-                                        {project.client_name && (
-                                            <p className="text-xs text-muted-foreground mt-0.5 md:hidden">{project.client_name}</p>
-                                        )}
-                                    </TableCell>
-                                    <TableCell className="text-muted-foreground hidden md:table-cell">
-                                        {project.client_name || <span className="opacity-40">—</span>}
-                                    </TableCell>
-                                    <TableCell className="text-muted-foreground hidden lg:table-cell">
-                                        {project.location || <span className="opacity-40">—</span>}
-                                    </TableCell>
-                                    <TableCell className="text-muted-foreground text-sm hidden sm:table-cell">
-                                        {formatDate(project.updated_at || project.created_at)}
-                                    </TableCell>
-                                    <TableCell>
-                                        <Badge variant="secondary" className="tabular-nums">
-                                            {project.plants?.length ?? 0}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell>
-                                        <ActionsMenu project={project} />
-                                    </TableCell>
-                                </TableRow>
+                                <ProjectTableRowMemo
+                                    key={project.id}
+                                    project={project}
+                                    onEdit={openEdit}
+                                    onDelete={handleDelete}
+                                    onDuplicate={handleDuplicate}
+                                />
                             ))}
                         </TableBody>
                     </Table>
