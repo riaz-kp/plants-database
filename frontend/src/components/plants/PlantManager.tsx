@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, useSearch } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { plantsApi } from '../../api/plants';
 import { taxonomyApi } from '../../api/taxonomy';
@@ -9,7 +9,7 @@ import type { PlantCreate, Plant } from '../../types/plant';
 
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
-import { categoriesApi } from '../../api/categories';
+import { plantsQueryOptions, taxonomyTreeQueryOptions, categoriesQueryOptions } from '../../api/queryOptions';
 import { aiApi } from '../../api/ai';
 import { cn } from '../../lib-frontend/utils';
 import { TaxonomyFormTable } from './TaxonomyFormTable';
@@ -111,7 +111,7 @@ export const PlantManager = () => {
     const [selectedProjectId, setSelectedProjectId] = useState<string>('');
 
     // Queries
-    const [searchParams] = useSearchParams();
+    const searchParams = useSearch({ strict: false }) as { category?: string };
     const { data: projectsData } = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.getAll() });
     
     // Pagination state
@@ -126,32 +126,46 @@ export const PlantManager = () => {
     }, [searchTerm]);
 
     const [filterCategory, setFilterCategory] = useState<string>(
-        () => searchParams.get('category') ?? '__all__'
+        () => searchParams.category ?? '__all__'
     );
     const [filterIndoor, setFilterIndoor] = useState(false);
     const [filterOutdoor, setFilterOutdoor] = useState(false);
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'recent' | 'oldest' | 'sci_asc' | 'sci_desc'>('recent');
 
-    const { data: plantsData, isLoading: plantsLoading } = useQuery({ 
-        queryKey: ['plants', currentPage, debouncedSearch, filterCategory, filterIndoor, filterOutdoor, sortOrder], 
-        queryFn: () => plantsApi.getAll({
-            skip: (currentPage - 1) * PAGE_SIZE,
-            limit: PAGE_SIZE,
-            search: debouncedSearch || undefined,
-            category: filterCategory === '__all__' ? undefined : filterCategory,
-            planting_place: (filterIndoor && filterOutdoor) ? PlantingPlace.BOTH
-                           : filterIndoor ? PlantingPlace.INDOOR
-                           : filterOutdoor ? PlantingPlace.OUTDOOR
-                           : undefined,
-            sort: sortOrder
-        })
-    });
+    const plantingPlace = (filterIndoor && filterOutdoor) ? PlantingPlace.BOTH
+                            : filterIndoor ? PlantingPlace.INDOOR
+                            : filterOutdoor ? PlantingPlace.OUTDOOR
+                            : undefined;
+
+    const plantsParams = {
+        skip: (currentPage - 1) * PAGE_SIZE,
+        limit: PAGE_SIZE,
+        search: debouncedSearch || undefined,
+        category: filterCategory === '__all__' ? undefined : filterCategory,
+        planting_place: plantingPlace,
+        sort: sortOrder
+    };
+
+    const { data: plantsData, isLoading: plantsLoading } = useQuery(plantsQueryOptions(plantsParams));
 
     const plants = plantsData?.items || [];
     const totalPlantsInDb = plantsData?.total || 0;
+    const totalPages = Math.max(1, Math.ceil(totalPlantsInDb / PAGE_SIZE));
 
-    const { data: taxonomyTree } = useQuery({ queryKey: ['taxonomy', 'tree'], queryFn: () => taxonomyApi.getTree() });
-    const { data: categoriesOptions } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.getAll() });
+    // Prefetch functionality
+    useEffect(() => {
+        if (currentPage < totalPages) {
+            const nextPage = currentPage + 1;
+            const nextParams = {
+                ...plantsParams,
+                skip: (nextPage - 1) * PAGE_SIZE,
+            };
+            queryClient.prefetchQuery(plantsQueryOptions(nextParams));
+        }
+    }, [currentPage, totalPages, plantsParams, queryClient]);
+
+    const { data: taxonomyTree } = useQuery(taxonomyTreeQueryOptions());
+    const { data: categoriesOptions } = useQuery(categoriesQueryOptions());
 
 
     // Mutations
@@ -177,12 +191,6 @@ export const PlantManager = () => {
 
 
 
-    useEffect(() => {
-        if (location.state?.editPlant && plants && taxonomyTree) {
-            handleEdit(location.state.editPlant);
-            navigate(location.pathname, { replace: true, state: {} });
-        }
-    }, [location.state, plants, taxonomyTree, navigate]);
 
     // Form State
     const [commonName, setCommonName] = useState('');
@@ -206,9 +214,9 @@ export const PlantManager = () => {
     const [mainImagePage, setMainImagePage] = useState(1);
 
     useEffect(() => {
-        if (location.state?.editPlant && plants && taxonomyTree) {
-            handleEdit(location.state.editPlant);
-            navigate(location.pathname, { replace: true, state: {} });
+        if ((location.state as any)?.editPlant && plants && taxonomyTree) {
+            handleEdit((location.state as any).editPlant);
+            navigate({ to: '.', replace: true, state: {} as any });
         }
     }, [location.state, plants, taxonomyTree, navigate]);
 
@@ -219,7 +227,7 @@ export const PlantManager = () => {
             showAlert('Plant created successfully', 'success');
             setIsCreating(false);
             resetForm();
-            navigate('/plants', { replace: true });
+            navigate({ to: '/plants', replace: true });
         },
         onError: (error: any) => {
             showAlert("Error creating plant: " + (error.response?.data?.detail || error.message), 'error');
@@ -234,7 +242,7 @@ export const PlantManager = () => {
             setEditingPlantId(null);
             setIsCreating(false);
             resetForm();
-            navigate('/plants', { replace: true });
+            navigate({ to: '/plants', replace: true });
         },
         onError: (error: any) => {
             showAlert("Error updating plant: " + (error.response?.data?.detail || error.message), 'error');
@@ -391,7 +399,7 @@ export const PlantManager = () => {
         if ((e.target as Element).closest('.actions-menu-container') ||
             (e.target as Element).closest('.dropdown-menu') ||
             (e.target as Element).tagName.toLowerCase() === 'input') return;
-        navigate(`/plants/${id}`);
+        navigate({ to: `/plants/${id}` as any });
     };
 
     const openSingleProjectModal = (plantId: string) => {
@@ -402,8 +410,7 @@ export const PlantManager = () => {
     const cancelEdit = () => {
         setEditingPlantId(null);
         setIsCreating(false);
-        resetForm();
-        navigate('/plants', { replace: true });
+        navigate({ to: '/plants', replace: true });
     };
 
     const toggleCreate = () => {
@@ -476,7 +483,6 @@ export const PlantManager = () => {
         else { createMutation.mutate(plantData as PlantCreate); }
     };
 
-    const totalPages = Math.max(1, Math.ceil(totalPlantsInDb / PAGE_SIZE));
     const displayedPlants = plants;
 
     // Reset to page 1 when filters/search change
@@ -559,7 +565,7 @@ export const PlantManager = () => {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                onClick={() => navigate('/plants/import')}
+                                                onClick={() => navigate({ to: '/plants/import' })}
                                                 className="h-8 px-3 text-xs gap-1.5 focus-visible:ring-0 hover:bg-background/50"
                                             >
                                                 <Upload size={13} className="text-muted-foreground" />

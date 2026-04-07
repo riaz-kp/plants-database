@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ioApi } from '../../api/io';
 import { aiApi } from '../../api/ai';
@@ -358,7 +358,7 @@ List of Plants to Process:
             );
             queryClient.invalidateQueries({ queryKey: ['plants'] });
             queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-            navigate('/plants');
+            navigate({ to: '/plants' });
         } catch (err: any) {
             showAlert('Import failed: ' + (err.response?.data?.detail || err.message), 'error');
         } finally {
@@ -385,7 +385,7 @@ List of Plants to Process:
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate('/plants')}
+                        onClick={() => navigate({ to: '/plants' })}
                         className="gap-1.5 text-muted-foreground hover:text-foreground"
                     >
                         <ArrowLeft size={15} />

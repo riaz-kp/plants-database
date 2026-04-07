@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { useSuspenseQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { Leaf, ListTree, Tags, FolderKanban, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { dashboardApi } from '../../api/dashboard';
+import { dashboardQueryOptions } from '../../api/queryOptions';
 
 const StatCard = ({
     title,
@@ -38,7 +38,7 @@ const StatCard = ({
 );
 
 export const Dashboard = () => {
-    const { data: stats } = useQuery({ queryKey: ['dashboard', 'stats'], queryFn: () => dashboardApi.getStats() });
+    const { data: stats } = useSuspenseQuery(dashboardQueryOptions());
 
     return (
         <div>

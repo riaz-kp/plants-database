@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft, Download, Plus, Pencil, Trash2, Leaf,
@@ -76,7 +76,7 @@ function SortTh({
 }
 
 export const ProjectDetails = () => {
-    const { id } = useParams<{ id: string }>();
+    const { id } = useParams({ strict: false }) as { id: string };
     const queryClient = useQueryClient();
     const { showAlert } = useAlert();
     const { confirm } = useConfirm();
@@ -458,7 +458,8 @@ export const ProjectDetails = () => {
 
                                                         <div className="flex-1 min-w-0">
                                                             <Link
-                                                                to={`/plants/${pp.plant_id}`}
+                                                                to="/plants/$id"
+                                                                params={{ id: pp.plant_id }}
                                                                 className="group/plant inline-flex items-start gap-1 font-medium text-foreground hover:text-primary transition-colors leading-tight"
                                                             >
                                                                 <span className="truncate">{pp.plant?.common_name}</span>

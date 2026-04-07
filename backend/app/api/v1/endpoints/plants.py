@@ -36,7 +36,14 @@ async def read_plants(
     if category:
         query = query.filter(Plant.category == category)
     if planting_place:
-        query = query.filter(Plant.planting_place == planting_place)
+        if planting_place == PlantingPlace.INDOOR:
+            query = query.filter(Plant.planting_place.in_([PlantingPlace.INDOOR, PlantingPlace.BOTH]))
+        elif planting_place == PlantingPlace.OUTDOOR:
+            query = query.filter(Plant.planting_place.in_([PlantingPlace.OUTDOOR, PlantingPlace.BOTH]))
+        elif planting_place == PlantingPlace.BOTH:
+            # If BOTH is requested (meaning both checkboxes in UI), show everything
+            # Actually, showing everything is the same as skipping the filter.
+            pass
     if search:
         query = query.filter(or_(
             Plant.common_name.ilike(f"%{search}%"),

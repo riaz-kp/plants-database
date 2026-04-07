@@ -6,7 +6,7 @@
  * URL expires after 2 days.
  */
 
-import { useParams } from 'react-router-dom';
+import { useParams } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { projectsApi } from '../../api/projects';
@@ -341,7 +341,7 @@ function PlantCard({
 
 /* ── Main component ── */
 export function ProjectPublicView() {
-    const { token } = useParams<{ token: string }>();
+    const { token } = useParams({ strict: false }) as { token: string };
     const styleRef = useRef<HTMLStyleElement | null>(null);
 
     // Inject a <style> into <head> to override the global overflow:hidden

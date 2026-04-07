@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '@tanstack/react-router';
 import { plantsApi } from '../../api/plants';
 
 import { taxonomyApi } from '../../api/taxonomy';
@@ -411,7 +411,7 @@ export const TaxonomyManager = () => {
                                                 variant="link"
                                                 size="sm"
                                                 className="h-auto p-0 text-[11px] text-primary gap-1 font-semibold opacity-80 hover:opacity-100"
-                                                onClick={() => navigate(`/plants/${plant.id}`)}
+                                                onClick={() => navigate({ to: `/plants/${plant.id}` as any })}
                                             >
                                                 View Plant Detail <ExternalLink size={10} />
                                             </Button>

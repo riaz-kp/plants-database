@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { client } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -16,10 +16,7 @@ export function LoginPage() {
     const [isLoading, setIsLoading] = useState(false);
 
     const { login } = useAuth();
-    const navigate = useNavigate();
-    const location = useLocation();
 
-    const from = (location.state as any)?.from?.pathname || '/';
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -29,7 +26,6 @@ export function LoginPage() {
         try {
             const response = await client.post('/auth/login', { username, password });
             login(response.data.access_token);
-            navigate(from, { replace: true });
         } catch (err: any) {
             setError(err.response?.data?.detail || 'Failed to login. Please check your credentials.');
         } finally {

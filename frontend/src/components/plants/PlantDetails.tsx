@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { plantsApi } from '../../api/plants';
@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 export const PlantDetails = () => {
-    const { id } = useParams<{ id: string }>();
+    const { id } = useParams({ strict: false }) as { id: string };
 
     const { data: plant, isLoading: plantLoading, error: plantError } = useQuery({
         queryKey: ['plants', id],
@@ -63,7 +63,7 @@ export const PlantDetails = () => {
                 </Link>
                 <Link
                     to="/plants"
-                    state={{ editPlant: plant }}
+                    state={{ editPlant: plant } as any}
                     className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                     <Edit3 size={16} /> Edit Plant
