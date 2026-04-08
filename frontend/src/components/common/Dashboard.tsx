@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Leaf, ListTree, Tags, FolderKanban, ArrowRight } from 'lucide-react';
+import { Leaf, ListTree, Tags, FolderKanban, ArrowRight, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { Button } from '../ui/button';
+import { cn } from '@/lib-frontend/utils';
 import { dashboardQueryOptions, plantsQueryOptions } from '../../api/queryOptions';
 import { useEffect } from 'react';
 import { queryClient } from '@/api/queryClient';
@@ -49,7 +51,7 @@ const StatCard = ({
 
 
 export const Dashboard = () => {
-    const { data: stats, isLoading } = useQuery(dashboardQueryOptions());
+    const { data: stats, isLoading, refetch, isFetching } = useQuery(dashboardQueryOptions());
 
     useEffect(() => {
         queryClient.prefetchQuery(plantsQueryOptions({ skip: 0, limit: 20, sort: 'recent' }));
@@ -58,11 +60,30 @@ export const Dashboard = () => {
     return (
         <div>
             {/* Page header */}
-            <div className="mb-8">
-                <h1 className="text-2xl font-semibold text-foreground tracking-tight">Dashboard</h1>
-                <p className="text-muted-foreground text-sm mt-1">
-                    Welcome to the Landschaft Plants Database.
-                </p>
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-semibold text-foreground tracking-tight">Dashboard</h1>
+                    <p className="text-muted-foreground text-sm mt-1">
+                        Welcome to the Landschaft Plants Database.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => refetch()} 
+                        onMouseEnter={() => {
+                            if (!isFetching) {
+                                queryClient.prefetchQuery(dashboardQueryOptions());
+                            }
+                        }}
+                        disabled={isFetching}
+                        className="h-9 px-3 gap-2 border-border/60 hover:bg-muted font-medium transition-all"
+                    >
+                        <RefreshCcw className={cn("h-4 w-4 transition-transform", isFetching && "animate-spin")} />
+                        {isFetching ? 'Refreshing...' : 'Refresh'}
+                    </Button>
+                </div>
             </div>
 
             {/* Stats grid */}
