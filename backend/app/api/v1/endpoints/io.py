@@ -1,5 +1,5 @@
 from typing import Any, List, Dict
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Body
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Body, Query
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -79,11 +79,24 @@ async def import_plants_csv(file: UploadFile = File(...),
 @router.post('/import/rows')
 async def import_plants_rows(
     rows: List[Dict[str, str]] = Body(...),
+    ignore_duplicates: bool = Query(False),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """Import plants from pre-edited JSON rows (output from the preview editor)."""
     try:
-        return await process_rows_import(db, rows)
+        result = await process_rows_import(db, rows, ignore_duplicates=ignore_duplicates)
+        if isinstance(result, dict) and result.get("has_duplicates"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Duplicated plants detected in import list.",
+                    "is_duplicate": True,
+                    "duplicates": result["duplicates"]
+                }
+            )
+        return result
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

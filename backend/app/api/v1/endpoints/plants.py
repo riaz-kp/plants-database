@@ -126,7 +126,8 @@ async def handle_upload_image_from_url(
 async def create_plant(
     *,
     db: AsyncSession = Depends(get_db),
-    plant_in: PlantCreate
+    plant_in: PlantCreate,
+    ignore_duplicate: bool = Query(False)
 ) -> Any:
     """
     Create new plant.
@@ -143,6 +144,39 @@ async def create_plant(
             raise HTTPException(
                 status_code=400, 
                 detail=f"Plant can only be linked to a Taxon of rank 'Species'. Current rank: {taxon.rank}"
+            )
+
+    # Check for duplicate
+    if not ignore_duplicate:
+        existing = None
+        if plant_in.taxon_id:
+            result = await db.execute(select(Plant).filter(Plant.taxon_id == plant_in.taxon_id))
+            existing = result.scalars().first()
+        
+        if not existing and plant_in.scientific_name:
+            result = await db.execute(
+                select(Plant).filter(func.lower(Plant.scientific_name) == plant_in.scientific_name.strip().lower())
+            )
+            existing = result.scalars().first()
+            
+        if not existing and plant_in.common_name:
+            result = await db.execute(
+                select(Plant).filter(func.lower(Plant.common_name) == plant_in.common_name.strip().lower())
+            )
+            existing = result.scalars().first()
+                
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "A duplicate plant already exists in the database.",
+                    "is_duplicate": True,
+                    "existing_plant": {
+                        "id": str(existing.id),
+                        "common_name": existing.common_name,
+                        "scientific_name": existing.scientific_name
+                    }
+                }
             )
 
     # 2. Create Plant

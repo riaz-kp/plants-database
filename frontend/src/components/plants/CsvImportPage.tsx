@@ -6,11 +6,19 @@ import { aiApi } from '../../api/ai';
 import { categoriesApi } from '../../api/categories';
 import { useAlert } from '../../contexts/AlertContext';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from '@/components/ui/dialog';
 import { cn } from '../../lib-frontend/utils';
 import {
     ArrowLeft, Upload, FileUp, Loader2, Trash2, Plus,
     AlertCircle, ChevronRight, Info, X, ImageOff, RefreshCw, Maximize2,
-    Copy, Check, Sparkles,
+    Copy, Check, Sparkles, AlertTriangle,
 } from 'lucide-react';
 
 // ── Field config ─────────────────────────────────────────────────────────────
@@ -269,6 +277,15 @@ List of Plants to Process:
     } | null>(null);
     const [isRegenerating, setIsRegenerating] = useState<Record<string, boolean>>({});
     const [regeneratePages, setRegeneratePages] = useState<Record<string, number>>({});
+    const [duplicateImportData, setDuplicateImportData] = useState<{
+        duplicates: Array<{
+            row_index: number;
+            common_name: string;
+            scientific_name: string;
+            existing_plant_id?: string;
+        }>;
+        rowsToImport: Record<string, string>[];
+    } | null>(null);
 
     const handleRegenerate = async (rowIdx: number, fieldKey: string, plantName: string) => {
         const searchName = plantName.trim();
@@ -343,24 +360,33 @@ List of Plants to Process:
         setRows(prev => prev.length === 1 ? [BLANK_ROW()] : prev.filter((_, i) => i !== idx));
 
     // ── Import ────────────────────────────────────────────────────────────
-    const handleImport = async () => {
-        const nonEmpty = rows.filter(r => r.common_name?.trim() || r.species?.trim());
+    const handleImport = async (ignoreDuplicates?: boolean, customRows?: Record<string, string>[]) => {
+        const rowsToProcess = customRows || rows;
+        const nonEmpty = rowsToProcess.filter(r => r.common_name?.trim() || r.species?.trim());
         if (nonEmpty.length === 0) {
             showAlert('No plants to import. Fill in at least one row.', 'warning');
             return;
         }
         setIsImporting(true);
         try {
-            const result = await ioApi.importRows(nonEmpty);
+            const result = await ioApi.importRows(nonEmpty, ignoreDuplicates);
             showAlert(
                 `Import complete! ✓ ${result.success} added${result.failed ? `, ✗ ${result.failed} failed` : ''}.`,
                 'success'
             );
             queryClient.invalidateQueries({ queryKey: ['plants'] });
             queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
+            setDuplicateImportData(null);
             navigate({ to: '/plants' });
         } catch (err: any) {
-            showAlert('Import failed: ' + (err.response?.data?.detail || err.message), 'error');
+            if (err.response?.status === 409 && err.response?.data?.detail?.is_duplicate) {
+                setDuplicateImportData({
+                    duplicates: err.response.data.detail.duplicates,
+                    rowsToImport: nonEmpty
+                });
+            } else {
+                showAlert('Import failed: ' + (err.response?.data?.detail || err.message), 'error');
+            }
         } finally {
             setIsImporting(false);
         }
@@ -536,7 +562,7 @@ List of Plants to Process:
                                 </Button>
                                 <Button
                                     size="sm"
-                                    onClick={handleImport}
+                                    onClick={() => handleImport()}
                                     disabled={isImporting || parseErrors.length > 0}
                                     className="flex-1 sm:flex-initial gap-1.5 h-8 text-[11px] font-bold bg-primary hover:bg-primary/90"
                                 >
@@ -653,7 +679,6 @@ List of Plants to Process:
                         </p>
                     </div>
                 )}
-                {/* Lightbox */}
                 {lightbox && (
                     <Lightbox
                         {...lightbox}
@@ -662,6 +687,80 @@ List of Plants to Process:
                         isRegenerating={!!isRegenerating[`${lightbox.rowIdx}_${lightbox.fieldKey}`]}
                     />
                 )}
+
+                {/* ── Duplicate Import Dialog ─────────────────────────────────── */}
+                <Dialog open={!!duplicateImportData} onOpenChange={(open) => !open && setDuplicateImportData(null)}>
+                    <DialogContent className="max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-destructive">
+                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                                Duplicate Plants Detected
+                            </DialogTitle>
+                            <DialogDescription className="pt-2 text-sm text-muted-foreground">
+                                We found plants in your import list that already exist in the database catalog.
+                            </DialogDescription>
+                        </DialogHeader>
+                        {duplicateImportData && (
+                            <div className="space-y-3">
+                                <div className="max-h-60 overflow-y-auto rounded-xl border border-border p-3 divide-y divide-border bg-muted/20">
+                                    {duplicateImportData.duplicates.map((dup, i) => (
+                                        <div key={i} className="py-2 first:pt-0 last:pb-0 flex flex-col">
+                                            <span className="font-medium text-sm text-foreground">
+                                                {dup.common_name}
+                                            </span>
+                                            {dup.scientific_name && (
+                                                <span className="text-xs italic text-muted-foreground">
+                                                    {dup.scientific_name}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    How would you like to handle these duplicates?
+                                </p>
+                            </div>
+                        )}
+                        <DialogFooter className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-1.5 justify-end">
+                            <Button 
+                                variant="outline" 
+                                onClick={() => setDuplicateImportData(null)}
+                                className="w-full sm:w-auto"
+                            >
+                                Cancel / Edit
+                            </Button>
+                            <Button 
+                                variant="outline" 
+                                onClick={() => {
+                                    if (duplicateImportData) {
+                                        const duplicateIndices = duplicateImportData.duplicates.map(d => d.row_index);
+                                        const remainingRows = duplicateImportData.rowsToImport.filter((_, idx) => !duplicateIndices.includes(idx));
+                                        handleImport(true, remainingRows);
+                                    }
+                                }}
+                                className="w-full sm:w-auto hover:bg-primary/5 border-primary/20 text-primary hover:text-primary"
+                            >
+                                Skip Duplicates
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                disabled={isImporting}
+                                onClick={() => {
+                                    if (duplicateImportData) {
+                                        handleImport(true, duplicateImportData.rowsToImport);
+                                    }
+                                }}
+                                className="w-full sm:w-auto gap-1.5"
+                            >
+                                {isImporting ? (
+                                    <><Loader2 size={13} className="animate-spin" /> Importing…</>
+                                ) : (
+                                    'Ignore & Import All'
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         </>
     );

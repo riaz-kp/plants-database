@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 1 week
 
     # Neon Postgres
-    NEON: str = None
+    NEON: Union[str, None] = None
     SQLALCHEMY_DATABASE_URI: Union[PostgresDsn, str] = None
 
     @validator("SQLALCHEMY_DATABASE_URI", pre=True)

@@ -23,12 +23,14 @@ export const ioApi = {
         return response.data;
     },
 
-    importRows: async (rows: Record<string, string>[]): Promise<{
+    importRows: async (rows: Record<string, string>[], ignoreDuplicates?: boolean): Promise<{
         success: number;
         failed: number;
         errors: string[];
     }> => {
-        const response = await client.post("/import/rows", rows);
+        const response = await client.post("/import/rows", rows, {
+            params: ignoreDuplicates !== undefined ? { ignore_duplicates: ignoreDuplicates } : undefined
+        });
         return response.data;
     },
 

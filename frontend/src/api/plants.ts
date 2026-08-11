@@ -15,8 +15,10 @@ export const plantsApi = {
         return response.data;
     },
 
-    create: async (data: PlantCreate): Promise<PlantResponse> => {
-        const response = await client.post<PlantResponse>("/plants/", data);
+    create: async (data: PlantCreate, ignoreDuplicate?: boolean): Promise<PlantResponse> => {
+        const response = await client.post<PlantResponse>("/plants/", data, {
+            params: ignoreDuplicate !== undefined ? { ignore_duplicate: ignoreDuplicate } : undefined
+        });
         return response.data;
     },
 

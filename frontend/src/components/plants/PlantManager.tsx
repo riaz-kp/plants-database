@@ -32,6 +32,7 @@ import {
     DialogHeader,
     DialogTitle,
     DialogFooter,
+    DialogDescription,
 } from '@/components/ui/dialog';
 import {
     Select,
@@ -85,6 +86,7 @@ import {
     ArrowDownAZ,
     ArrowUpAZ,
     History,
+    AlertTriangle,
 } from 'lucide-react';
 
 
@@ -414,17 +416,35 @@ export const PlantManager = () => {
         }
     }, [location.state, plants, taxonomyTree, navigate]);
 
+    const [duplicatePlantData, setDuplicatePlantData] = useState<{
+        plantData: PlantCreate;
+        existingPlant: {
+            id: string;
+            common_name: string;
+            scientific_name?: string;
+        };
+    } | null>(null);
+
     const createMutation = useMutation({
-        mutationFn: plantsApi.create,
+        mutationFn: ({ data, ignoreDuplicate }: { data: PlantCreate; ignoreDuplicate?: boolean }) =>
+            plantsApi.create(data, ignoreDuplicate),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['plants'] });
             showAlert('Plant created successfully', 'success');
             setIsCreating(false);
             resetForm();
+            setDuplicatePlantData(null);
             navigate({ to: '/plants', replace: true });
         },
-        onError: (error: any) => {
-            showAlert("Error creating plant: " + (error.response?.data?.detail || error.message), 'error');
+        onError: (error: any, variables) => {
+            if (error.response?.status === 409 && error.response?.data?.detail?.is_duplicate) {
+                setDuplicatePlantData({
+                    plantData: variables.data,
+                    existingPlant: error.response.data.detail.existing_plant
+                });
+            } else {
+                showAlert("Error creating plant: " + (error.response?.data?.detail || error.message), 'error');
+            }
         }
     });
 
@@ -674,7 +694,7 @@ export const PlantManager = () => {
             image_url: finalImageUrl || undefined, care_data: parsedCareData,
         };
         if (editingPlantId) { updateMutation.mutate({ id: editingPlantId, data: plantData }); }
-        else { createMutation.mutate(plantData as PlantCreate); }
+        else { createMutation.mutate({ data: plantData as PlantCreate }); }
     };
 
     const displayedPlants = plants;
@@ -1337,6 +1357,63 @@ export const PlantManager = () => {
                                 className="gap-1.5"
                             >
                                 {addPlantsToProjectMutation.isPending ? <><Loader2 size={13} className="animate-spin" /> Adding…</> : 'Add Plants'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* ── Duplicate Plant Dialog ─────────────────────────────────── */}
+                <Dialog open={!!duplicatePlantData} onOpenChange={(open) => !open && setDuplicatePlantData(null)}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-destructive">
+                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                                Duplicate Plant Detected
+                            </DialogTitle>
+                            <DialogDescription className="pt-2 text-sm text-muted-foreground">
+                                A plant with the same species/scientific name already exists in the catalog:
+                            </DialogDescription>
+                        </DialogHeader>
+                        {duplicatePlantData && (
+                            <div className="bg-destructive/5 rounded-xl border border-destructive/10 p-4 space-y-2.5">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Existing Plant</span>
+                                    <span className="font-semibold text-foreground">
+                                        {duplicatePlantData.existingPlant.common_name}
+                                    </span>
+                                    {duplicatePlantData.existingPlant.scientific_name && (
+                                        <span className="text-sm italic text-muted-foreground">
+                                            {duplicatePlantData.existingPlant.scientific_name}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        <DialogFooter className="mt-4 gap-2 sm:gap-0">
+                            <Button 
+                                variant="outline" 
+                                onClick={() => setDuplicatePlantData(null)}
+                            >
+                                Skip / Cancel
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                disabled={createMutation.isPending}
+                                onClick={() => {
+                                    if (duplicatePlantData) {
+                                        createMutation.mutate({ 
+                                            data: duplicatePlantData.plantData, 
+                                            ignoreDuplicate: true 
+                                        });
+                                    }
+                                }}
+                                className="gap-1.5"
+                            >
+                                {createMutation.isPending ? (
+                                    <><Loader2 size={13} className="animate-spin" /> Adding…</>
+                                ) : (
+                                    'Ignore & Add Anyway'
+                                )}
                             </Button>
                         </DialogFooter>
                     </DialogContent>

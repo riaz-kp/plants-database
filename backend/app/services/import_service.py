@@ -41,6 +41,76 @@ async def _get_or_create_taxon(
     return taxon
 
 
+async def _find_existing_species_taxon(db: AsyncSession, row: dict) -> Optional[Taxon]:
+    hierarchy_ranks = [
+        Rank.KINGDOM,
+        Rank.DIVISION,
+        Rank.CLASS,
+        Rank.ORDER,
+        Rank.FAMILY,
+        Rank.GENUS,
+    ]
+    parent_id = None
+    for rank in hierarchy_ranks:
+        name = row.get(rank.value.lower(), "")
+        if not name:
+            if rank == Rank.KINGDOM:
+                return None
+            continue
+        stmt = select(Taxon).where(
+            Taxon.name == name,
+            Taxon.rank == rank,
+            Taxon.parent_id == parent_id,
+        )
+        res = await db.execute(stmt)
+        taxon = res.scalars().first()
+        if not taxon:
+            return None
+        parent_id = taxon.id
+        
+    species_name = row.get("species", "")
+    if not species_name:
+        return None
+    stmt = select(Taxon).where(
+        Taxon.name == species_name,
+        Taxon.rank == Rank.SPECIES,
+        Taxon.parent_id == parent_id,
+    )
+    res = await db.execute(stmt)
+    return res.scalars().first()
+
+
+async def find_duplicates_in_rows(db: AsyncSession, rows: list) -> list:
+    duplicates = []
+    for idx, row in enumerate(rows, start=1):
+        species_taxon = await _find_existing_species_taxon(db, row)
+        existing_plant = None
+        if species_taxon:
+            plant_res = await db.execute(select(Plant).where(Plant.taxon_id == species_taxon.id))
+            existing_plant = plant_res.scalars().first()
+            
+        if not existing_plant:
+            scientific_name = row.get("scientific_name", "")
+            if scientific_name:
+                plant_res = await db.execute(select(Plant).where(func.lower(Plant.scientific_name) == scientific_name.lower()))
+                existing_plant = plant_res.scalars().first()
+                
+        if not existing_plant:
+            common_name = row.get("common_name", "")
+            if common_name:
+                plant_res = await db.execute(select(Plant).where(func.lower(Plant.common_name) == common_name.lower()))
+                existing_plant = plant_res.scalars().first()
+                
+        if existing_plant:
+            duplicates.append({
+                "row_index": idx - 1,  # 0-indexed for frontend array matching
+                "common_name": row.get("common_name", "") or existing_plant.common_name,
+                "scientific_name": row.get("scientific_name", "") or row.get("species", "") or existing_plant.scientific_name,
+                "existing_plant_id": str(existing_plant.id)
+            })
+    return duplicates
+
+
 def _clean_url(raw: Optional[str]) -> Optional[str]:
     """Extract the first valid https URL from a cell value.
     Handles AI-generated Markdown links like [url](url), bare URLs,
@@ -160,6 +230,7 @@ async def _process_single_row(
     row_idx: int,
     results: Dict[str, Any],
     hierarchy_ranks,
+    ignore_duplicates: bool = False,
 ) -> None:
     """Shared logic: build taxonomy, AI-fill, upload images, create Plant."""
     try:
@@ -180,11 +251,12 @@ async def _process_single_row(
         species_taxon = await _get_or_create_taxon(db, species_name, Rank.SPECIES, parent_id)
 
         # 2. Duplicate check
-        existing = (
-            await db.execute(select(Plant).where(Plant.taxon_id == species_taxon.id))
-        ).scalars().first()
-        if existing:
-            return  # skip silently
+        if not ignore_duplicates:
+            existing = (
+                await db.execute(select(Plant).where(Plant.taxon_id == species_taxon.id))
+            ).scalars().first()
+            if existing:
+                return  # skip silently
 
         # 3. Text fields
         common_name = row.get("common_name", "")
@@ -294,15 +366,23 @@ async def _process_single_row(
         results["errors"].append(f"Row {row_idx}: {exc}")
 
 
-async def process_rows_import(db: AsyncSession, rows: list) -> Dict[str, Any]:
+async def process_rows_import(db: AsyncSession, rows: list, ignore_duplicates: bool = False) -> Dict[str, Any]:
     """Import plants from a pre-edited list of row dicts (from the frontend editor)."""
     hierarchy_ranks = [
         Rank.KINGDOM, Rank.DIVISION, Rank.CLASS,
         Rank.ORDER, Rank.FAMILY, Rank.GENUS,
     ]
+    if not ignore_duplicates:
+        duplicates = await find_duplicates_in_rows(db, rows)
+        if duplicates:
+            return {
+                "has_duplicates": True,
+                "duplicates": duplicates
+            }
+
     results: Dict[str, Any] = {"success": 0, "failed": 0, "errors": []}
     for idx, row in enumerate(rows, start=1):
-        await _process_single_row(db, row, idx, results, hierarchy_ranks)
+        await _process_single_row(db, row, idx, results, hierarchy_ranks, ignore_duplicates=ignore_duplicates)
     await db.commit()
     return results
 
