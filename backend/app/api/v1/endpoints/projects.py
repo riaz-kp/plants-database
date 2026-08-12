@@ -167,15 +167,22 @@ async def add_plant_to_project(
     existing = result.scalars().first()
     
     if existing:
-        if plant_in.notes:
-            existing.notes = plant_in.notes
+        existing.notes = plant_in.notes
+        existing.quantity = plant_in.quantity
+        existing.unit = plant_in.unit
+        existing.optimum_height_size = plant_in.optimum_height_size
+        existing.rate = plant_in.rate
         db.add(existing)
     else:
         # Create new association
         new_association = ProjectPlant(
             project_id=project_id,
             plant_id=plant_in.plant_id,
-            notes=plant_in.notes
+            notes=plant_in.notes,
+            quantity=plant_in.quantity,
+            unit=plant_in.unit,
+            optimum_height_size=plant_in.optimum_height_size,
+            rate=plant_in.rate
         )
         db.add(new_association)
         
@@ -217,8 +224,11 @@ async def update_plant_in_project(
     if not existing:
         raise HTTPException(status_code=404, detail="Plant not found in this project")
 
-    if plant_in.notes is not None:
-        existing.notes = plant_in.notes
+    existing.notes = plant_in.notes
+    existing.quantity = plant_in.quantity
+    existing.unit = plant_in.unit
+    existing.optimum_height_size = plant_in.optimum_height_size
+    existing.rate = plant_in.rate
 
     project.updated_at = datetime.utcnow()
     await db.commit()
@@ -350,7 +360,11 @@ async def duplicate_project(
         new_pp = ProjectPlant(
             project_id=new_project.id,
             plant_id=pp.plant_id,
-            notes=pp.notes
+            notes=pp.notes,
+            quantity=pp.quantity,
+            unit=pp.unit,
+            optimum_height_size=pp.optimum_height_size,
+            rate=pp.rate
         )
         db.add(new_pp)
     

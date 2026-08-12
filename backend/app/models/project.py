@@ -28,6 +28,10 @@ class ProjectPlant(Base):
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id"), primary_key=True)
     
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quantity: Mapped[Optional[float]] = mapped_column(sa.Float, nullable=True)
+    unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    optimum_height_size: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rate: Mapped[Optional[float]] = mapped_column(sa.Float, nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="plants")

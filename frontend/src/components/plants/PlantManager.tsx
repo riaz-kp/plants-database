@@ -206,12 +206,41 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
 });
 
 const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onClick }: PlantItemProps) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') {
+            const input = e.currentTarget;
+            const currentCell = input.closest('td');
+            const currentRow = input.closest('tr');
+            if (!currentCell || !currentRow) return;
+
+            const cellIndex = Array.from(currentRow.children).indexOf(currentCell);
+            const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+            
+            e.preventDefault();
+
+            let targetRow = direction === 'up' 
+                ? currentRow.previousElementSibling as HTMLTableRowElement | null 
+                : currentRow.nextElementSibling as HTMLTableRowElement | null;
+
+            while (targetRow) {
+                const targetInput = targetRow.cells[cellIndex]?.querySelector('input') as HTMLInputElement | null;
+                if (targetInput && !targetInput.disabled) {
+                    targetInput.focus();
+                    break;
+                }
+                targetRow = direction === 'up' 
+                    ? targetRow.previousElementSibling as HTMLTableRowElement | null 
+                    : targetRow.nextElementSibling as HTMLTableRowElement | null;
+            }
+        }
+    };
+
     return (
         <TableRow
             key={plant.id}
             onClick={(e) => onClick(plant.id, e)}
             className={cn(
-                "cursor-pointer select-none transition-colors",
+                "cursor-pointer select-none transition-colors focus-within:bg-primary/[0.04]",
                 isSelected ? 'bg-primary/5 hover:bg-primary/10' : ''
             )}
         >
@@ -219,9 +248,14 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
                 <input
                     type="checkbox"
                     checked={isSelected}
-                    onChange={(e) => { e.stopPropagation(); onSelect(plant.id); }}
+                    onChange={(e) => { 
+                        e.stopPropagation(); 
+                        onSelect(plant.id); 
+                        e.target.focus();
+                    }}
                     onClick={e => e.stopPropagation()}
-                    className="w-4 h-4 cursor-pointer accent-primary"
+                    onKeyDown={handleKeyDown}
+                    className="w-4 h-4 cursor-pointer text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none accent-primary"
                 />
             </TableCell>
             <TableCell className="px-2">

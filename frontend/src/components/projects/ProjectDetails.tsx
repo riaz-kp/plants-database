@@ -1,12 +1,15 @@
-import { useState, useMemo, useEffect, memo, useCallback } from 'react';
+import { useState, useMemo, useEffect, memo, useCallback, Fragment } from 'react';
 import { useParams, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft, Download, Plus, Pencil, Trash2, Leaf,
     User, MapPin, ExternalLink, Search, ChevronUp, ChevronDown,
     ChevronsUpDown, ChevronLeft, ChevronRight,
-    Link2, Copy, Check, RefreshCw,
+    Link2, Copy, Check, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
+import ExcelJS from 'exceljs';
+import { exportProjectBoqPdf } from './ProjectBoqPdfDocument';
+import { exportProjectQuotationPdf } from './ProjectQuotationPdfDocument';
 
 import { projectsApi } from '../../api/projects';
 import type { ShareLinkInfo } from '../../api/projects';
@@ -199,6 +202,493 @@ const ProjectPlantRowMemo = memo(({ pp, idx, safePage, pageSize, onEdit, onDelet
     );
 });
 
+const ProjectBoqRow = ({
+    pp,
+    idx,
+    onDelete,
+    onUpdate,
+    isSelected,
+    onSelectChange
+}: {
+    pp: any;
+    idx: number;
+    onDelete: (plantId: string, plantName: string) => void;
+    onUpdate: (plantId: string, data: any) => Promise<void>;
+    isSelected: boolean;
+    onSelectChange: (plantId: string, selected: boolean) => void;
+}) => {
+    const [localQty, setLocalQty] = useState(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
+    const [localUnit, setLocalUnit] = useState(pp.unit ?? '');
+    const [localSize, setLocalSize] = useState(pp.optimum_height_size ?? '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        setLocalQty(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
+        setLocalUnit(pp.unit ?? '');
+        setLocalSize(pp.optimum_height_size ?? '');
+    }, [pp.quantity, pp.unit, pp.optimum_height_size]);
+
+    const handleBlur = async (field: 'quantity' | 'unit' | 'optimum_height_size', value: string) => {
+        const trimmed = value.trim();
+        let hasChanged = false;
+        if (field === 'quantity') {
+            const parsed = trimmed ? parseFloat(trimmed) : null;
+            const original = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : null;
+            hasChanged = parsed !== original;
+        } else if (field === 'unit') {
+            const original = pp.unit ?? '';
+            hasChanged = trimmed !== original;
+        } else if (field === 'optimum_height_size') {
+            const original = pp.optimum_height_size ?? '';
+            hasChanged = trimmed !== original;
+        }
+
+        if (!hasChanged) return;
+
+        setSaving(true);
+        try {
+            const parsedQty = field === 'quantity' ? (trimmed ? parseFloat(trimmed) : null) : (localQty.trim() ? parseFloat(localQty) : null);
+            const currentUnit = field === 'unit' ? trimmed : localUnit;
+            const currentSize = field === 'optimum_height_size' ? trimmed : localSize;
+            
+            await onUpdate(pp.plant_id, {
+                plant_id: pp.plant_id,
+                notes: pp.notes,
+                quantity: parsedQty === null ? undefined : parsedQty,
+                unit: currentUnit || undefined,
+                optimum_height_size: currentSize || undefined
+            });
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        const input = e.currentTarget;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') {
+            const currentCell = input.closest('td');
+            const currentRow = input.closest('tr');
+            if (!currentCell || !currentRow) return;
+
+            const cellIndex = Array.from(currentRow.children).indexOf(currentCell);
+            const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+            
+            e.preventDefault();
+
+            let targetRow = direction === 'up' 
+                ? currentRow.previousElementSibling as HTMLTableRowElement | null 
+                : currentRow.nextElementSibling as HTMLTableRowElement | null;
+
+            while (targetRow) {
+                const targetInput = targetRow.cells[cellIndex]?.querySelector('input') as HTMLInputElement | null;
+                if (targetInput && !targetInput.disabled) {
+                    targetInput.focus();
+                    if (targetInput.type !== 'checkbox') {
+                        targetInput.select();
+                    }
+                    break;
+                }
+                targetRow = direction === 'up' 
+                    ? targetRow.previousElementSibling as HTMLTableRowElement | null 
+                    : targetRow.nextElementSibling as HTMLTableRowElement | null;
+            }
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const currentRow = input.closest('tr');
+            if (!currentRow) return;
+
+            let isAtEdge = true;
+            try {
+                if (input.selectionStart !== null && input.selectionEnd !== null) {
+                    if (e.key === 'ArrowLeft') {
+                        isAtEdge = input.selectionStart === 0;
+                    } else {
+                        isAtEdge = input.selectionEnd === input.value.length;
+                    }
+                }
+            } catch (err) {
+                isAtEdge = true;
+            }
+
+            if (isAtEdge) {
+                const rowInputs = Array.from(currentRow.querySelectorAll('input')) as HTMLInputElement[];
+                const currentInputIdx = rowInputs.indexOf(input);
+                const targetInput = e.key === 'ArrowLeft' 
+                    ? rowInputs[currentInputIdx - 1] 
+                    : rowInputs[currentInputIdx + 1];
+
+                if (targetInput) {
+                    e.preventDefault();
+                    targetInput.focus();
+                    if (targetInput.type !== 'checkbox') {
+                        targetInput.select();
+                    }
+                }
+            }
+        }
+    };
+
+    return (
+        <TableRow className={`hover:bg-muted/10 transition-colors focus-within:bg-primary/[0.04] ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+            {/* # */}
+            <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
+                {idx + 1}
+            </TableCell>
+            
+            {/* Checkbox */}
+            <TableCell className="w-10 text-center">
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => {
+                        onSelectChange(pp.plant_id, e.target.checked);
+                        e.target.focus();
+                    }}
+                    onKeyDown={handleKeyDown}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none accent-primary"
+                />
+            </TableCell>
+
+            {/* Image */}
+            <TableCell className="w-14">
+                <div className="flex justify-center">
+                    {pp.plant?.icon_url ? (
+                        <img
+                            src={pp.plant.icon_url}
+                            alt=""
+                            className="w-12 h-12 object-cover rounded-lg border border-border/50 shadow-sm"
+                        />
+                    ) : (
+                        <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center border border-border/50">
+                            <Leaf size={18} className="text-muted-foreground/40" />
+                        </div>
+                    )}
+                </div>
+            </TableCell>
+
+            {/* Common Name */}
+            <TableCell className="font-semibold text-foreground w-36 max-w-[144px] truncate">
+                {pp.plant?.common_name || '—'}
+            </TableCell>
+
+            {/* Scientific Name */}
+            <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
+                {pp.plant?.scientific_name || pp.plant?.taxon?.name || '—'}
+            </TableCell>
+
+            {/* Quantity */}
+            <TableCell className="w-20 min-w-[70px]">
+                <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={localQty}
+                    onChange={(e) => setLocalQty(e.target.value)}
+                    onBlur={() => handleBlur('quantity', localQty)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                />
+            </TableCell>
+
+            {/* Unit */}
+            <TableCell className="w-20 min-w-[70px]">
+                <input
+                    type="text"
+                    value={localUnit}
+                    onChange={(e) => setLocalUnit(e.target.value)}
+                    onBlur={() => handleBlur('unit', localUnit)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-muted-foreground focus:text-foreground focus:outline-none text-center"
+                />
+            </TableCell>
+
+            {/* Height/Size */}
+            <TableCell className="w-24 min-w-[90px]">
+                <input
+                    type="text"
+                    value={localSize}
+                    onChange={(e) => setLocalSize(e.target.value)}
+                    onBlur={() => handleBlur('optimum_height_size', localSize)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center"
+                />
+            </TableCell>
+
+            {/* Actions */}
+            <TableCell className="text-right w-10">
+                <div className="flex items-center justify-end gap-1">
+                    <Button
+                        variant="ghost" size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => onDelete(pp.plant_id, pp.plant?.common_name || 'Plant')}
+                        title="Remove plant"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                </div>
+            </TableCell>
+        </TableRow>
+    );
+};
+
+const ProjectQuotationRow = ({
+    pp,
+    idx,
+    onDelete,
+    onUpdate,
+    isSelected,
+    onSelectChange
+}: {
+    pp: any;
+    idx: number;
+    onDelete: (plantId: string, plantName: string) => void;
+    onUpdate: (plantId: string, data: any) => Promise<void>;
+    isSelected: boolean;
+    onSelectChange: (plantId: string, selected: boolean) => void;
+}) => {
+    const [localQty, setLocalQty] = useState(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
+    const [localUnit, setLocalUnit] = useState(pp.unit ?? '');
+    const [localSize, setLocalSize] = useState(pp.optimum_height_size ?? '');
+    const [localRate, setLocalRate] = useState(pp.rate !== undefined && pp.rate !== null ? String(pp.rate) : '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        setLocalQty(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
+        setLocalUnit(pp.unit ?? '');
+        setLocalSize(pp.optimum_height_size ?? '');
+        setLocalRate(pp.rate !== undefined && pp.rate !== null ? String(pp.rate) : '');
+    }, [pp.quantity, pp.unit, pp.optimum_height_size, pp.rate]);
+
+    const handleBlur = async (field: 'quantity' | 'unit' | 'optimum_height_size' | 'rate', value: string) => {
+        const trimmed = value.trim();
+        let hasChanged = false;
+        if (field === 'quantity') {
+            const parsed = trimmed ? parseFloat(trimmed) : null;
+            const original = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : null;
+            hasChanged = parsed !== original;
+        } else if (field === 'unit') {
+            const original = pp.unit ?? '';
+            hasChanged = trimmed !== original;
+        } else if (field === 'optimum_height_size') {
+            const original = pp.optimum_height_size ?? '';
+            hasChanged = trimmed !== original;
+        } else if (field === 'rate') {
+            const parsed = trimmed ? parseFloat(trimmed) : null;
+            const original = pp.rate !== undefined && pp.rate !== null ? pp.rate : null;
+            hasChanged = parsed !== original;
+        }
+
+        if (!hasChanged) return;
+
+        setSaving(true);
+        try {
+            const parsedQty = field === 'quantity' ? (trimmed ? parseFloat(trimmed) : null) : (localQty.trim() ? parseFloat(localQty) : null);
+            const currentUnit = field === 'unit' ? trimmed : localUnit;
+            const currentSize = field === 'optimum_height_size' ? trimmed : localSize;
+            const parsedRate = field === 'rate' ? (trimmed ? parseFloat(trimmed) : null) : (localRate.trim() ? parseFloat(localRate) : null);
+            
+            await onUpdate(pp.plant_id, {
+                plant_id: pp.plant_id,
+                notes: pp.notes,
+                quantity: parsedQty === null ? undefined : parsedQty,
+                unit: currentUnit || undefined,
+                optimum_height_size: currentSize || undefined,
+                rate: parsedRate === null ? undefined : parsedRate
+            });
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        const input = e.currentTarget;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') {
+            const currentCell = input.closest('td');
+            const currentRow = input.closest('tr');
+            if (!currentCell || !currentRow) return;
+
+            const cellIndex = Array.from(currentRow.children).indexOf(currentCell);
+            const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+            
+            e.preventDefault();
+
+            let targetRow = direction === 'up' 
+                ? currentRow.previousElementSibling as HTMLTableRowElement | null 
+                : currentRow.nextElementSibling as HTMLTableRowElement | null;
+
+            while (targetRow) {
+                const targetInput = targetRow.cells[cellIndex]?.querySelector('input') as HTMLInputElement | null;
+                if (targetInput && !targetInput.disabled) {
+                    targetInput.focus();
+                    if (targetInput.type !== 'checkbox') {
+                        targetInput.select();
+                    }
+                    break;
+                }
+                targetRow = direction === 'up' 
+                    ? targetRow.previousElementSibling as HTMLTableRowElement | null 
+                    : targetRow.nextElementSibling as HTMLTableRowElement | null;
+            }
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const currentRow = input.closest('tr');
+            if (!currentRow) return;
+
+            let isAtEdge = true;
+            try {
+                if (input.selectionStart !== null && input.selectionEnd !== null) {
+                    if (e.key === 'ArrowLeft') {
+                        isAtEdge = input.selectionStart === 0;
+                    } else {
+                        isAtEdge = input.selectionEnd === input.value.length;
+                    }
+                }
+            } catch (err) {
+                isAtEdge = true;
+            }
+
+            if (isAtEdge) {
+                const rowInputs = Array.from(currentRow.querySelectorAll('input')) as HTMLInputElement[];
+                const currentInputIdx = rowInputs.indexOf(input);
+                const targetInput = e.key === 'ArrowLeft' 
+                    ? rowInputs[currentInputIdx - 1] 
+                    : rowInputs[currentInputIdx + 1];
+
+                if (targetInput) {
+                    e.preventDefault();
+                    targetInput.focus();
+                    if (targetInput.type !== 'checkbox') {
+                        targetInput.select();
+                    }
+                }
+            }
+        }
+    };
+
+    const amount = (pp.quantity !== undefined && pp.quantity !== null && pp.rate !== undefined && pp.rate !== null)
+        ? pp.quantity * pp.rate
+        : null;
+
+    return (
+        <TableRow className={`hover:bg-muted/10 transition-colors focus-within:bg-primary/[0.04] ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+            <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
+                {idx + 1}
+            </TableCell>
+            
+            <TableCell className="w-10 text-center">
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => {
+                        onSelectChange(pp.plant_id, e.target.checked);
+                        e.target.focus();
+                    }}
+                    onKeyDown={handleKeyDown}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none accent-primary"
+                />
+            </TableCell>
+
+            <TableCell className="w-14">
+                <div className="flex justify-center">
+                    {pp.plant?.icon_url ? (
+                        <img
+                            src={pp.plant.icon_url}
+                            alt=""
+                            className="w-12 h-12 object-cover rounded-lg border border-border/50 shadow-sm"
+                        />
+                    ) : (
+                        <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center border border-border/50">
+                            <Leaf size={18} className="text-muted-foreground/40" />
+                        </div>
+                    )}
+                </div>
+            </TableCell>
+
+            <TableCell className="font-semibold text-foreground w-36 max-w-[144px] truncate">
+                {pp.plant?.common_name || '—'}
+            </TableCell>
+
+            <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
+                {pp.plant?.scientific_name || pp.plant?.taxon?.name || '—'}
+            </TableCell>
+
+            <TableCell className="w-20 min-w-[70px]">
+                <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={localQty}
+                    onChange={(e) => setLocalQty(e.target.value)}
+                    onBlur={() => handleBlur('quantity', localQty)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                />
+            </TableCell>
+
+            <TableCell className="w-20 min-w-[70px]">
+                <input
+                    type="text"
+                    value={localUnit}
+                    onChange={(e) => setLocalUnit(e.target.value)}
+                    onBlur={() => handleBlur('unit', localUnit)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-muted-foreground focus:text-foreground focus:outline-none text-center"
+                />
+            </TableCell>
+
+            <TableCell className="w-24 min-w-[90px]">
+                <input
+                    type="text"
+                    value={localSize}
+                    onChange={(e) => setLocalSize(e.target.value)}
+                    onBlur={() => handleBlur('optimum_height_size', localSize)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="—"
+                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center"
+                />
+            </TableCell>
+
+            <TableCell className="w-24 min-w-[90px]">
+                <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={localRate}
+                    onChange={(e) => setLocalRate(e.target.value)}
+                    onBlur={() => handleBlur('rate', localRate)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="0.00"
+                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                />
+            </TableCell>
+
+            <TableCell className="w-28 min-w-[110px] text-center font-bold text-sm text-primary tabular-nums">
+                {amount !== null ? `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+            </TableCell>
+
+            <TableCell className="text-right w-10">
+                <div className="flex items-center justify-end gap-1">
+                    <Button
+                        variant="ghost" size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => onDelete(pp.plant_id, pp.plant?.common_name || 'Plant')}
+                        title="Remove plant"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                </div>
+            </TableCell>
+        </TableRow>
+    );
+};
+
 export const ProjectDetails = () => {
     const { id } = useParams({ strict: false }) as { id: string };
     const queryClient = useQueryClient();
@@ -210,6 +700,10 @@ export const ProjectDetails = () => {
     const [editingPlantId, setEditingPlantId] = useState<string | null>(null);
     const [selectedPlantId, setSelectedPlantId] = useState('');
     const [notes, setNotes] = useState('');
+    const [quantity, setQuantity] = useState('');
+    const [unit, setUnit] = useState('');
+    const [optimumHeightSize, setOptimumHeightSize] = useState('');
+    const [rate, setRate] = useState('');
 
     /* ── Table state ── */
     const [search, setSearch] = useState('');
@@ -220,6 +714,19 @@ export const ProjectDetails = () => {
     const [pageSize, setPageSize] = useState(10);
 
     const [pdfLoading, setPdfLoading] = useState(false);
+    const [viewMode, setViewMode] = useState<'standard' | 'boq' | 'quotation'>('standard');
+    const [pdfBoqLoading, setPdfBoqLoading] = useState(false);
+    const [pdfQuotationLoading, setPdfQuotationLoading] = useState(false);
+    const [selectedPlantIds, setSelectedPlantIds] = useState<string[]>([]);
+    const [bulkUpdating, setBulkUpdating] = useState(false);
+    const [bulkUnit, setBulkUnit] = useState('');
+    const [bulkQty, setBulkQty] = useState('');
+    const [bulkSize, setBulkSize] = useState('');
+    const [bulkRate, setBulkRate] = useState('');
+
+    useEffect(() => {
+        setSelectedPlantIds([]);
+    }, [viewMode]);
 
     /* ── Share link state ── */
     const [shareLink, setShareLink] = useState<ShareLinkInfo | null>(null);
@@ -286,6 +793,679 @@ export const ProjectDetails = () => {
         }
     };
 
+    const handleExportQuotationPdf = async () => {
+        if (!project) return;
+        setPdfQuotationLoading(true);
+        try {
+            const { prepareProjectImageCache } = await import('../../utils/pdf-images');
+            const imgCache = await prepareProjectImageCache(project);
+            await exportProjectQuotationPdf(project, imgCache, project.name);
+        } catch (e) {
+            console.error(e);
+            showAlert('Quotation PDF export failed', 'error');
+        } finally {
+            setPdfQuotationLoading(false);
+        }
+    };
+
+    const handleExportBoqPdf = async () => {
+        if (!project) return;
+        setPdfBoqLoading(true);
+        try {
+            const { prepareProjectImageCache } = await import('../../utils/pdf-images');
+            const imgCache = await prepareProjectImageCache(project);
+            await exportProjectBoqPdf(project, imgCache, project.name);
+        } catch (e) {
+            console.error(e);
+            showAlert('BOQ PDF export failed', 'error');
+        } finally {
+            setPdfBoqLoading(false);
+        }
+    };
+
+    // Helper to auto-crop whitespace from an HTMLImageElement
+    const cropImage = (imageElement: HTMLImageElement): Promise<{ buffer: ArrayBuffer; width: number; height: number } | null> => {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(null);
+                return;
+            }
+            canvas.width = imageElement.naturalWidth;
+            canvas.height = imageElement.naturalHeight;
+            ctx.drawImage(imageElement, 0, 0);
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+            
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < canvas.width; x++) {
+                    const idx = (y * canvas.width + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const b = data[idx + 2];
+                    const alpha = data[idx + 3];
+                    
+                    // Consider pixel non-empty if it has alpha > 10 and is not pure white
+                    const isWhite = r > 248 && g > 248 && b > 248;
+                    const isEmpty = alpha < 10 || isWhite;
+                    if (!isEmpty) {
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+            
+            // Add a small safety padding
+            const padding = 15;
+            minX = Math.max(0, minX - padding);
+            minY = Math.max(0, minY - padding);
+            maxX = Math.min(canvas.width, maxX + padding);
+            maxY = Math.min(canvas.height, maxY + padding);
+            
+            const cropWidth = maxX - minX;
+            const cropHeight = maxY - minY;
+            
+            if (cropWidth <= 0 || cropHeight <= 0) {
+                resolve(null);
+                return;
+            }
+            
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = cropWidth;
+            cropCanvas.height = cropHeight;
+            const cropCtx = cropCanvas.getContext('2d');
+            if (!cropCtx) {
+                resolve(null);
+                return;
+            }
+            cropCtx.drawImage(imageElement, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+            
+            cropCanvas.toBlob((blob) => {
+                if (blob) {
+                    blob.arrayBuffer().then((buf) => {
+                        resolve({ buffer: buf, width: cropWidth, height: cropHeight });
+                    });
+                } else {
+                    resolve(null);
+                }
+            }, 'image/png');
+        });
+    };
+
+    // Helper to fetch remote image as array buffer for Excel insertion
+    const fetchImageAsBuffer = async (url: string): Promise<{ buffer: ArrayBuffer; extension: string } | null> => {
+        try {
+            let fetchUrl = url;
+            if (url.startsWith('//')) {
+                fetchUrl = 'https:' + url;
+            }
+            const res = await fetch(fetchUrl, { mode: 'cors' });
+            if (!res.ok) return null;
+            const buffer = await res.arrayBuffer();
+            let ext = 'png';
+            if (url.toLowerCase().includes('.jpg') || url.toLowerCase().includes('.jpeg')) {
+                ext = 'jpeg';
+            } else if (url.toLowerCase().includes('.gif')) {
+                ext = 'gif';
+            }
+            return { buffer, extension: ext };
+        } catch (e) {
+            console.warn('CORS or fetch error for Excel image:', url, e);
+            return null;
+        }
+    };
+
+    const handleExportBoqExcel = async () => {
+        if (!project) return;
+        showAlert('Generating BOQ Excel with images...', 'info');
+        try {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('BOQ');
+
+            // Set gridlines visible
+            worksheet.views = [{ showGridLines: true }];
+
+            // Set Column widths (first column reduced to 6)
+            worksheet.columns = [
+                { key: 'serial', width: 6 },
+                { key: 'img', width: 14 },
+                { key: 'common', width: 28 },
+                { key: 'sci', width: 28 },
+                { key: 'qty', width: 12 },
+                { key: 'unit', width: 12 },
+                { key: 'height', width: 20 },
+                { key: 'notes', width: 32 }
+            ];
+
+            // Set row heights for spacious header
+            worksheet.getRow(1).height = 24;
+            worksheet.getRow(2).height = 15;
+            worksheet.getRow(3).height = 18;
+            worksheet.getRow(4).height = 18;
+            worksheet.getRow(5).height = 18;
+            worksheet.getRow(6).height = 18;
+            worksheet.getRow(7).height = 15;
+
+            // Hide gridlines in the header area by applying solid white fill to cells A1:H7
+            for (let r = 1; r <= 7; r++) {
+                const row = worksheet.getRow(r);
+                for (let c = 1; c <= 8; c++) {
+                    const cell = row.getCell(c);
+                    cell.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFFFFFFF' }
+                    };
+                }
+            }
+
+            // 1. Add Landschaft Logo PNG (Top Right in Column H)
+            try {
+                const logoImg = new Image();
+                logoImg.crossOrigin = 'anonymous';
+                const logoLoaded = new Promise<boolean>((resolve) => {
+                    logoImg.onload = () => resolve(true);
+                    logoImg.onerror = () => resolve(false);
+                });
+                logoImg.src = '/logo-color.png';
+                const loaded = await logoLoaded;
+                if (loaded) {
+                    const cropResult = await cropImage(logoImg);
+                    if (cropResult) {
+                        const logoId = workbook.addImage({
+                            buffer: cropResult.buffer,
+                            extension: 'png',
+                        });
+                        
+                        // Scale proportionally: width of 175 makes it larger.
+                        const targetWidth = 175;
+                        const targetHeight = (cropResult.height / cropResult.width) * targetWidth;
+                        
+                        worksheet.addImage(logoId, {
+                            tl: { col: 7.32, row: 1.2 }, // Center in Column H, bottom-aligned sitting lower
+                            ext: { width: targetWidth, height: targetHeight }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('Failed to embed cropped logo in Excel:', err);
+            }
+
+            // 2. Add Header Titles and Metadata
+            const titleCell = worksheet.getCell('A1');
+            titleCell.value = 'BILL OF QUANTITIES';
+            titleCell.font = { name: 'Arial', size: 18, bold: true, color: { argb: 'FF1B3B2B' } };
+
+            const metaRows = [
+                ['Project:', project.name],
+                ['Client:', project.client_name || '—'],
+                ['Location:', project.location || '—'],
+                ['Date:', new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })]
+            ];
+
+            metaRows.forEach((row, i) => {
+                const rowIdx = i + 3;
+                worksheet.mergeCells(`A${rowIdx}:C${rowIdx}`);
+                const cell = worksheet.getCell(`A${rowIdx}`);
+                cell.value = {
+                    richText: [
+                        { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
+                        { text: row[1], font: { name: 'Arial', size: 10, color: { argb: 'FF1A1A1A' } } }
+                    ]
+                };
+                cell.alignment = { vertical: 'middle', horizontal: 'left' };
+            });
+
+            // 3. Add Table Headers (Row 8)
+            const headerRow = worksheet.getRow(8);
+            headerRow.height = 28;
+            const headers = ['#', 'Img', 'Common Name', 'Scientific Name', 'Qty', 'Unit', 'Height/Size (ft)', 'Notes'];
+            headers.forEach((h, colIdx) => {
+                const cell = headerRow.getCell(colIdx + 1);
+                cell.value = h;
+                cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FF1B3B2B' }
+                };
+                cell.alignment = {
+                    vertical: 'middle',
+                    horizontal: colIdx === 0 || colIdx === 1 || colIdx === 4 || colIdx === 5 || colIdx === 6 ? 'center' : 'left'
+                };
+                cell.border = {
+                    bottom: { style: 'medium', color: { argb: 'FF1B3B2B' } }
+                };
+            });
+
+            // Group by Category
+            const groups = new Map<string, typeof project.plants>();
+            for (const pp of project.plants) {
+                if (!pp.plant) continue;
+                const cat = pp.plant.category || 'Uncategorized';
+                if (!groups.has(cat)) groups.set(cat, []);
+                groups.get(cat)!.push(pp);
+            }
+            const sortedGroups = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+            let currentRowIdx = 9;
+            let serialIdx = 0;
+
+            for (const [category, pps] of sortedGroups) {
+                // Category Header Row
+                const catRow = worksheet.getRow(currentRowIdx);
+                catRow.height = 24;
+                
+                // Merge category header cells A-H
+                worksheet.mergeCells(`A${currentRowIdx}:H${currentRowIdx}`);
+                const catCell = catRow.getCell(1);
+                catCell.value = `${category.toUpperCase()} (${pps.length})`;
+                catCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1B3B2B' } };
+                catCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFF0EDE8' }
+                };
+                catCell.alignment = { vertical: 'middle', indent: 1 };
+                catCell.border = {
+                    top: { style: 'thin', color: { argb: 'FFE5E1D8' } },
+                    bottom: { style: 'thin', color: { argb: 'FFE5E1D8' } }
+                };
+
+                currentRowIdx += 1;
+
+                // Add plant rows
+                for (let i = 0; i < pps.length; i++) {
+                    const pp = pps[i];
+                    const p = pp.plant!;
+                    serialIdx += 1;
+                    
+                    const row = worksheet.getRow(currentRowIdx);
+                    row.height = 42; // Height to fit image
+
+                    const isAlt = i % 2 === 1;
+                    const rowBgColor = isAlt ? 'FFF6F4F1' : 'FFFFFFFF';
+
+                    // Set values
+                    row.getCell(1).value = serialIdx;
+                    row.getCell(3).value = p.common_name;
+                    row.getCell(4).value = p.scientific_name || p.taxon?.name || '—';
+                    row.getCell(5).value = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : '—';
+                    row.getCell(6).value = pp.unit || '—';
+                    row.getCell(7).value = pp.optimum_height_size || '—';
+                    row.getCell(8).value = pp.notes || '—';
+
+                    // Stylings & alignments
+                    for (let col = 1; col <= 8; col++) {
+                        const cell = row.getCell(col);
+                        cell.font = {
+                            name: 'Arial',
+                            size: 10,
+                            bold: col === 3 || col === 5, // bold common name and quantity
+                            italic: col === 4, // italic scientific name
+                            color: { argb: col === 3 ? 'FF1B3B2B' : 'FF1A1A1A' }
+                        };
+                        cell.alignment = {
+                            vertical: 'middle',
+                            horizontal: col === 1 || col === 2 || col === 5 || col === 6 || col === 7 ? 'center' : 'left',
+                            wrapText: col === 8 || col === 3 || col === 4
+                        };
+                        cell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: rowBgColor }
+                        };
+                        cell.border = {
+                            bottom: { style: 'thin', color: { argb: 'FFE5E1D8' } }
+                        };
+                    }
+
+                    // Add Image in Column 2 (B)
+                    const imgUrl = p.icon_url || p.image_url;
+                    if (imgUrl) {
+                        try {
+                            const imgData = await fetchImageAsBuffer(imgUrl);
+                            if (imgData) {
+                                const imageId = workbook.addImage({
+                                    buffer: imgData.buffer,
+                                    extension: imgData.extension as any,
+                                });
+                                worksheet.addImage(imageId, {
+                                    tl: { col: 1.1, row: currentRowIdx - 0.9 },
+                                    ext: { width: 38, height: 38 }
+                                });
+                            }
+                        } catch (err) {
+                            console.warn('Failed to embed plant image in Excel:', imgUrl, err);
+                        }
+                    }
+
+                    currentRowIdx += 1;
+                }
+            }
+
+            // Write and Download Workbook
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `${project.name}_BOQ.xlsx`;
+            anchor.click();
+            window.URL.revokeObjectURL(url);
+
+            showAlert('BOQ Excel exported successfully', 'success');
+        } catch (e) {
+            console.error(e);
+            showAlert('Excel export failed', 'error');
+        }
+    };
+
+    const handleExportQuotationExcel = async () => {
+        if (!project) return;
+        showAlert('Generating Quotation Excel with images...', 'info');
+        try {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Quotation');
+
+            // Set gridlines visible
+            worksheet.views = [{ showGridLines: true }];
+
+            // Set Column widths
+            worksheet.columns = [
+                { key: 'serial', width: 6 },
+                { key: 'img', width: 14 },
+                { key: 'common', width: 28 },
+                { key: 'sci', width: 28 },
+                { key: 'qty', width: 12 },
+                { key: 'unit', width: 12 },
+                { key: 'height', width: 20 },
+                { key: 'rate', width: 14 },
+                { key: 'amount', width: 16 }
+            ];
+
+            // Set row heights for spacious header
+            worksheet.getRow(1).height = 24;
+            worksheet.getRow(2).height = 15;
+            worksheet.getRow(3).height = 18;
+            worksheet.getRow(4).height = 18;
+            worksheet.getRow(5).height = 18;
+            worksheet.getRow(6).height = 18;
+            worksheet.getRow(7).height = 15;
+
+            // Hide gridlines in the header area by applying solid white fill to cells A1:I7
+            for (let r = 1; r <= 7; r++) {
+                const row = worksheet.getRow(r);
+                for (let c = 1; c <= 9; c++) {
+                    const cell = row.getCell(c);
+                    cell.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFFFFFFF' }
+                    };
+                }
+            }
+
+            // 1. Add Landschaft Logo PNG (Top Right in Column I)
+            try {
+                const logoImg = new Image();
+                logoImg.crossOrigin = 'anonymous';
+                const logoLoaded = new Promise<boolean>((resolve) => {
+                    logoImg.onload = () => resolve(true);
+                    logoImg.onerror = () => resolve(false);
+                });
+                logoImg.src = '/logo-color.png';
+                const loaded = await logoLoaded;
+                if (loaded) {
+                    const cropResult = await cropImage(logoImg);
+                    if (cropResult) {
+                        const logoId = workbook.addImage({
+                            buffer: cropResult.buffer,
+                            extension: 'png',
+                        });
+                        
+                        const targetWidth = 175;
+                        const targetHeight = (cropResult.height / cropResult.width) * targetWidth;
+                        
+                        worksheet.addImage(logoId, {
+                            tl: { col: 7.58, row: 1.2 }, // Center in Column I
+                            ext: { width: targetWidth, height: targetHeight }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('Failed to embed cropped logo in Excel:', err);
+            }
+
+            // 2. Add Header Titles and Metadata
+            const titleCell = worksheet.getCell('A1');
+            titleCell.value = 'LANDSCAPE QUOTATION';
+            titleCell.font = { name: 'Arial', size: 18, bold: true, color: { argb: 'FF1B3B2B' } };
+
+            const metaRows = [
+                ['Project:', project.name],
+                ['Client:', project.client_name || '—'],
+                ['Location:', project.location || '—'],
+                ['Date:', new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })]
+            ];
+
+            metaRows.forEach((row, i) => {
+                const rowIdx = i + 3;
+                worksheet.mergeCells(`A${rowIdx}:C${rowIdx}`);
+                const cell = worksheet.getCell(`A${rowIdx}`);
+                cell.value = {
+                    richText: [
+                        { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
+                        { text: row[1], font: { name: 'Arial', size: 10, color: { argb: 'FF1A1A1A' } } }
+                    ]
+                };
+                cell.alignment = { vertical: 'middle', horizontal: 'left' };
+            });
+
+            // 3. Add Table Headers (Row 8)
+            const headerRow = worksheet.getRow(8);
+            headerRow.height = 28;
+            const headers = ['#', 'Img', 'Common Name', 'Scientific Name', 'Qty', 'Unit', 'Height/Size (ft)', 'Rate', 'Amount'];
+            headers.forEach((h, colIdx) => {
+                const cell = headerRow.getCell(colIdx + 1);
+                cell.value = h;
+                cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FF1B3B2B' }
+                };
+                cell.alignment = {
+                    vertical: 'middle',
+                    horizontal: colIdx === 0 || colIdx === 1 || colIdx === 4 || colIdx === 5 || colIdx === 6 || colIdx === 7 || colIdx === 8 ? 'center' : 'left'
+                };
+                cell.border = {
+                    bottom: { style: 'medium', color: { argb: 'FF1B3B2B' } }
+                };
+            });
+
+            // Group by Category
+            const groups = new Map<string, typeof project.plants>();
+            for (const pp of project.plants) {
+                if (!pp.plant) continue;
+                const cat = pp.plant.category || 'Uncategorized';
+                if (!groups.has(cat)) groups.set(cat, []);
+                groups.get(cat)!.push(pp);
+            }
+            const sortedGroups = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+            let currentRowIdx = 9;
+            let serialIdx = 0;
+
+            for (const [category, pps] of sortedGroups) {
+                // Category Header Row
+                const catRow = worksheet.getRow(currentRowIdx);
+                catRow.height = 24;
+                
+                worksheet.mergeCells(`A${currentRowIdx}:I${currentRowIdx}`);
+                const catCell = catRow.getCell(1);
+                catCell.value = `${category.toUpperCase()} (${pps.length})`;
+                catCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1B3B2B' } };
+                catCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFF0EDE8' }
+                };
+                catCell.alignment = { vertical: 'middle', indent: 1 };
+                catCell.border = {
+                    top: { style: 'thin', color: { argb: 'FFE5E1D8' } },
+                    bottom: { style: 'thin', color: { argb: 'FFE5E1D8' } }
+                };
+
+                currentRowIdx += 1;
+
+                // Add plant rows
+                for (let i = 0; i < pps.length; i++) {
+                    const pp = pps[i];
+                    const p = pp.plant!;
+                    serialIdx += 1;
+                    
+                    const row = worksheet.getRow(currentRowIdx);
+                    row.height = 42;
+
+                    const isAlt = i % 2 === 1;
+                    const rowBgColor = isAlt ? 'FFF6F4F1' : 'FFFFFFFF';
+
+                    // Set values
+                    row.getCell(1).value = serialIdx;
+                    row.getCell(3).value = p.common_name;
+                    row.getCell(4).value = p.scientific_name || p.taxon?.name || '—';
+                    row.getCell(5).value = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : '—';
+                    row.getCell(6).value = pp.unit || '—';
+                    row.getCell(7).value = pp.optimum_height_size || '—';
+                    row.getCell(8).value = pp.rate !== undefined && pp.rate !== null ? pp.rate : '—';
+                    if (pp.quantity !== undefined && pp.quantity !== null && pp.rate !== undefined && pp.rate !== null) {
+                        row.getCell(9).value = pp.quantity * pp.rate;
+                    } else {
+                        row.getCell(9).value = '—';
+                    }
+
+                    // Stylings & alignments
+                    for (let col = 1; col <= 9; col++) {
+                        const cell = row.getCell(col);
+                        cell.font = {
+                            name: 'Arial',
+                            size: 10,
+                            bold: col === 3 || col === 5 || col === 9,
+                            italic: col === 4,
+                            color: { argb: col === 3 ? 'FF1B3B2B' : 'FF1A1A1A' }
+                        };
+                        
+                        let alignmentHorizontal: 'center' | 'left' | 'right' = 'left';
+                        if (col === 1 || col === 2 || col === 5 || col === 6 || col === 7) {
+                            alignmentHorizontal = 'center';
+                        } else if (col === 8 || col === 9) {
+                            alignmentHorizontal = 'right';
+                        }
+                        
+                        cell.alignment = {
+                            vertical: 'middle',
+                            horizontal: alignmentHorizontal,
+                            wrapText: col === 3 || col === 4
+                        };
+                        
+                        if ((col === 8 || col === 9) && typeof cell.value === 'number') {
+                            cell.numFmt = '#,##0.00';
+                        }
+                        
+                        cell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: rowBgColor }
+                        };
+                        cell.border = {
+                            bottom: { style: 'thin', color: { argb: 'FFE5E1D8' } }
+                        };
+                    }
+
+                    // Add Image in Column 2 (B)
+                    const imgUrl = p.icon_url || p.image_url;
+                    if (imgUrl) {
+                        try {
+                            const imgData = await fetchImageAsBuffer(imgUrl);
+                            if (imgData) {
+                                const imageId = workbook.addImage({
+                                    buffer: imgData.buffer,
+                                    extension: imgData.extension as any,
+                                });
+                                worksheet.addImage(imageId, {
+                                    tl: { col: 1.1, row: currentRowIdx - 0.9 },
+                                    ext: { width: 38, height: 38 }
+                                });
+                            }
+                        } catch (err) {
+                            console.warn('Failed to embed plant image in Excel:', imgUrl, err);
+                        }
+                    }
+
+                    currentRowIdx += 1;
+                }
+            }
+
+            // Add Total Row at the bottom of the table
+            const totalRow = worksheet.getRow(currentRowIdx);
+            totalRow.height = 28;
+            
+            worksheet.mergeCells(`A${currentRowIdx}:D${currentRowIdx}`);
+            const labelCell = totalRow.getCell(1);
+            labelCell.value = 'Total Quotation Summary:';
+            labelCell.alignment = { vertical: 'middle', horizontal: 'right' };
+            
+            const totalQtyVal = project.plants.reduce((sum, pp) => sum + (pp.quantity || 0), 0);
+            totalRow.getCell(5).value = totalQtyVal;
+            
+            const totalAmtVal = project.plants.reduce((sum, pp) => sum + ((pp.quantity || 0) * (pp.rate || 0)), 0);
+            totalRow.getCell(9).value = totalAmtVal;
+            
+            for (let col = 1; col <= 9; col++) {
+                const cell = totalRow.getCell(col);
+                cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1B3B2B' } };
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFF0EDE8' }
+                };
+                cell.border = {
+                    top: { style: 'thin', color: { argb: 'FF1B3B2B' } },
+                    bottom: { style: 'double', color: { argb: 'FF1B3B2B' } }
+                };
+                
+                if (col === 5) {
+                    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                } else if (col === 9) {
+                    cell.alignment = { vertical: 'middle', horizontal: 'right' };
+                    cell.numFmt = '#,##0.00';
+                }
+            }
+
+            // Write and Download Workbook
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `${project.name}_Quotation.xlsx`;
+            anchor.click();
+            window.URL.revokeObjectURL(url);
+
+            showAlert('Quotation Excel exported successfully', 'success');
+        } catch (e) {
+            console.error(e);
+            showAlert('Excel export failed', 'error');
+        }
+    };
+
     /* ── Mutations ── */
     const addPlantMutation = useMutation({
         mutationFn: (data: ProjectPlantCreate) => projectsApi.addPlant(id!, data),
@@ -305,10 +1485,107 @@ export const ProjectDetails = () => {
         onError: (e: any) => { showAlert('Failed to remove: ' + (e.response?.data?.detail || e.message), 'error'); },
     });
 
+    const updateBoqFieldsMutation = useMutation({
+        mutationFn: (data: { plantId: string } & Partial<ProjectPlantCreate>) => {
+            const { plantId, ...payload } = data;
+            return projectsApi.updatePlant(id!, plantId, payload as ProjectPlantCreate);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['project', id] });
+        },
+        onError: (e: any) => {
+            showAlert('Failed to update: ' + (e.response?.data?.detail || e.message), 'error');
+        }
+    });
+
+    const handleUpdateBoqFields = useCallback(async (plantId: string, data: any) => {
+        try {
+            await updateBoqFieldsMutation.mutateAsync({ plantId, ...data });
+        } catch (e) {
+            // Error already shown in mutation onError
+        }
+    }, [updateBoqFieldsMutation]);
+
+    const handleBulkEdit = async (data: { quantity?: number; unit?: string; optimum_height_size?: string; rate?: number }) => {
+        if (selectedPlantIds.length === 0) return;
+        setBulkUpdating(true);
+        try {
+            const promises = selectedPlantIds.map(plantId => {
+                const pp = project?.plants.find(item => item.plant_id === plantId);
+                const payload: ProjectPlantCreate = {
+                    plant_id: plantId,
+                    notes: pp?.notes,
+                    quantity: data.quantity !== undefined ? data.quantity : pp?.quantity,
+                    unit: data.unit !== undefined ? data.unit : pp?.unit,
+                    optimum_height_size: data.optimum_height_size !== undefined ? data.optimum_height_size : pp?.optimum_height_size,
+                    rate: data.rate !== undefined ? data.rate : pp?.rate,
+                };
+                return projectsApi.updatePlant(id!, plantId, payload);
+            });
+            await Promise.all(promises);
+            queryClient.invalidateQueries({ queryKey: ['project', id] });
+            showAlert('Bulk update completed successfully', 'success');
+            setSelectedPlantIds([]);
+        } catch (e: any) {
+            showAlert('Bulk update failed: ' + (e.message || 'error'), 'error');
+        } finally {
+            setBulkUpdating(false);
+        }
+    };
+
+    const handleSelectChange = useCallback((plantId: string, selected: boolean) => {
+        setSelectedPlantIds(prev => {
+            if (selected) {
+                return prev.includes(plantId) ? prev : [...prev, plantId];
+            } else {
+                return prev.filter(id => id !== plantId);
+            }
+        });
+    }, []);
+
+    const handleSelectAllChange = useCallback((selected: boolean, visiblePlants: any[]) => {
+        if (selected) {
+            const allIds = visiblePlants.map(pp => pp.plant_id);
+            setSelectedPlantIds(allIds);
+        } else {
+            setSelectedPlantIds([]);
+        }
+    }, []);
+
     /* ── Dialog helpers ── */
-    const openAdd = useCallback(() => { setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); setIsDialogOpen(true); }, []);
-    const openEdit = useCallback((plantId: string, currentNotes: string) => { setEditingPlantId(plantId); setSelectedPlantId(plantId); setNotes(currentNotes); setIsDialogOpen(true); }, []);
-    const closeDialog = useCallback(() => { setIsDialogOpen(false); setEditingPlantId(null); setSelectedPlantId(''); setNotes(''); }, []);
+    const openAdd = useCallback(() => {
+        setEditingPlantId(null);
+        setSelectedPlantId('');
+        setNotes('');
+        setQuantity('');
+        setUnit('');
+        setOptimumHeightSize('');
+        setRate('');
+        setIsDialogOpen(true);
+    }, []);
+    const openEdit = useCallback((plantId: string) => {
+        if (!project) return;
+        const pp = project.plants.find(p => p.plant_id === plantId);
+        if (!pp) return;
+        setEditingPlantId(plantId);
+        setSelectedPlantId(plantId);
+        setNotes(pp.notes ?? '');
+        setQuantity(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
+        setUnit(pp.unit ?? '');
+        setOptimumHeightSize(pp.optimum_height_size ?? '');
+        setRate(pp.rate !== undefined && pp.rate !== null ? String(pp.rate) : '');
+        setIsDialogOpen(true);
+    }, [project]);
+    const closeDialog = useCallback(() => {
+        setIsDialogOpen(false);
+        setEditingPlantId(null);
+        setSelectedPlantId('');
+        setNotes('');
+        setQuantity('');
+        setUnit('');
+        setOptimumHeightSize('');
+        setRate('');
+    }, []);
 
     const handleDeletePlant = useCallback((plantId: string, plantName: string) => {
         confirm({ title: 'Remove Plant', message: `Remove "${plantName}" from this project?`, confirmText: 'Remove', cancelText: 'Cancel', onConfirm: () => deletePlantMutation.mutate(plantId) });
@@ -317,7 +1594,16 @@ export const ProjectDetails = () => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedPlantId) { showAlert('Please select a plant', 'warning'); return; }
-        const payload = { plant_id: selectedPlantId, notes };
+        const parsedQty = quantity.trim() ? parseFloat(quantity) : undefined;
+        const parsedRate = rate.trim() ? parseFloat(rate) : undefined;
+        const payload = {
+            plant_id: selectedPlantId,
+            notes: notes.trim() || undefined,
+            quantity: parsedQty,
+            unit: unit.trim() || undefined,
+            optimum_height_size: optimumHeightSize.trim() || undefined,
+            rate: parsedRate
+        };
         editingPlantId ? updatePlantMutation.mutate(payload) : addPlantMutation.mutate(payload);
     };
 
@@ -366,6 +1652,33 @@ export const ProjectDetails = () => {
                 return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
             });
     }, [project, search, categoryFilter, sortKey, sortDir]);
+
+    const boqGroups = useMemo(() => {
+        const groups = new Map<string, typeof filteredSorted>();
+        for (const pp of filteredSorted) {
+            const cat = pp.plant?.category || 'Uncategorized';
+            if (!groups.has(cat)) groups.set(cat, []);
+            groups.get(cat)!.push(pp);
+        }
+        return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    }, [filteredSorted]);
+
+    const totalQuotationAmount = useMemo(() => {
+        if (!project) return 0;
+        return project.plants.reduce((sum, pp) => {
+            const qty = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : 0;
+            const rate = pp.rate !== undefined && pp.rate !== null ? pp.rate : 0;
+            return sum + (qty * rate);
+        }, 0);
+    }, [project]);
+
+    const totalQuotationQty = useMemo(() => {
+        if (!project) return 0;
+        return project.plants.reduce((sum, pp) => {
+            const qty = pp.quantity !== undefined && pp.quantity !== null ? pp.quantity : 0;
+            return sum + qty;
+        }, 0);
+    }, [project]);
 
     const totalPages = Math.max(1, Math.ceil(filteredSorted.length / pageSize));
     const safePage = Math.min(page, totalPages);
@@ -481,11 +1794,36 @@ export const ProjectDetails = () => {
                         <h2 className="font-semibold text-foreground">Plants List</h2>
                         <Badge variant="secondary" className="tabular-nums">{project.plants.length}</Badge>
                     </div>
-                    <Button size="sm" onClick={openAdd}>
-                        <Plus className="w-4 h-4 mr-2" />
-                        <span className="hidden sm:inline">Add Plant</span>
-                        <span className="sm:hidden">Add</span>
-                    </Button>
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1 border border-border rounded-lg p-0.5 bg-muted/20">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('standard')}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'standard' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                                Standard List
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('boq')}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'boq' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                                BOQ View
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('quotation')}
+                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'quotation' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                                Quotation View
+                            </button>
+                        </div>
+                        <Button size="sm" onClick={openAdd}>
+                            <Plus className="w-4 h-4 mr-2" />
+                            <span className="hidden sm:inline">Add Plant</span>
+                            <span className="sm:hidden">Add</span>
+                        </Button>
+                    </div>
                 </div>
 
                 {project.plants.length === 0 ? (
@@ -494,6 +1832,269 @@ export const ProjectDetails = () => {
                         <p className="text-sm">No plants added yet.</p>
                         <Button variant="link" size="sm" className="mt-1" onClick={openAdd}>Add the first plant</Button>
                     </div>
+                ) : viewMode === 'boq' || viewMode === 'quotation' ? (
+                    <>
+                        {/* BOQ/Quotation Header Document Section */}
+                        <div className="p-5 border-b border-border bg-gradient-to-r from-background to-[#fdfcfb]">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                                <div className="flex-1 space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="text-[10px] tracking-wider uppercase font-semibold text-primary border-primary/20 bg-primary/5">
+                                            {viewMode === 'boq' ? 'Landscape BOQ' : 'Landscape Quotation'}
+                                        </Badge>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm text-muted-foreground">
+                                        <div>
+                                            <span className="font-semibold text-foreground mr-1.5">Client Name:</span>
+                                            {project.client_name || <span className="opacity-40 italic">Not Specified</span>}
+                                        </div>
+                                        <div>
+                                            <span className="font-semibold text-foreground mr-1.5">Date:</span>
+                                            {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                                        </div>
+                                        <div className="sm:col-span-2">
+                                            <span className="font-semibold text-foreground mr-1.5">Location:</span>
+                                            {project.location || <span className="opacity-40 italic">Not Specified</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex flex-col items-end gap-2 shrink-0 md:border-l md:border-border md:pl-6">
+                                    {/* Landschaft Logo */}
+                                    <div className="flex flex-col items-center gap-1.5">
+                                        <svg viewBox="0 0 400 400" className="w-14 h-14" xmlns="http://www.w3.org/2000/svg">
+                                            <g transform="translate(-85,0)">
+                                                <path fill="#2d5a27" d="M125 70 Q125 40 155 40 H245 Q275 40 275 70 V190 H125 Z" />
+                                                <path fill="#8aa87f" d="M125 210 H275 V360 H155 Q125 360 125 330 V210 Z" />
+                                                <path fill="#c8b8a2" d="M295 210 H415 Q445 210 445 240 V330 Q445 360 415 360 H295 V210 Z" />
+                                            </g>
+                                        </svg>
+                                        <span className="text-[10px] font-bold tracking-[0.25em] text-[#2d5a27] leading-none">LANDSCHAFT</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center justify-between gap-2 mt-5 pt-4 border-t border-border/50 flex-wrap">
+                                <div>
+                                    {viewMode === 'quotation' && (
+                                        <div className="text-sm font-semibold text-primary bg-primary/5 border border-primary/20 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                            <span>Total Quotation Amount:</span>
+                                            <span className="text-base font-bold tabular-nums">
+                                                {totalQuotationAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button variant="outline" size="sm" className="h-8.5 font-medium border-green-600/30 hover:border-green-600/50 hover:bg-green-50/50 text-green-700 transition-colors" onClick={viewMode === 'boq' ? handleExportBoqExcel : handleExportQuotationExcel}>
+                                        <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5" /> Export Excel
+                                    </Button>
+                                    <Button variant="outline" size="sm" className="h-8.5 font-medium border-red-600/30 hover:border-red-600/50 hover:bg-red-50/50 text-red-700 transition-colors" onClick={viewMode === 'boq' ? handleExportBoqPdf : handleExportQuotationPdf} disabled={pdfBoqLoading || pdfQuotationLoading}>
+                                        {viewMode === 'boq' ? (
+                                            pdfBoqLoading ? 'Generating PDF…' : <><Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF</>
+                                        ) : (
+                                            pdfQuotationLoading ? 'Generating PDF…' : <><Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF</>
+                                        )}
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Bulk Edit Toolbar */}
+                        {selectedPlantIds.length > 0 && (
+                            <div className="mx-5 my-3 p-4 bg-primary/5 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-end justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="space-y-1">
+                                    <h4 className="text-sm font-semibold text-primary">Bulk Edit Selected</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                        Modifying <span className="font-semibold text-foreground">{selectedPlantIds.length}</span> plants. Leave fields blank to keep their current values.
+                                    </p>
+                                </div>
+                                <div className={`grid ${viewMode === 'quotation' ? 'grid-cols-4' : 'grid-cols-3'} gap-3 flex-1 max-w-xl`}>
+                                    <div className="space-y-1">
+                                        <Label htmlFor="bulk-unit" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Unit</Label>
+                                        <Input
+                                            id="bulk-unit"
+                                            placeholder="e.g. Nos."
+                                            className="h-8 text-xs bg-white"
+                                            value={bulkUnit}
+                                            onChange={(e) => setBulkUnit(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label htmlFor="bulk-qty" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Quantity</Label>
+                                        <Input
+                                            id="bulk-qty"
+                                            type="number"
+                                            step="any"
+                                            placeholder="e.g. 25"
+                                            className="h-8 text-xs bg-white"
+                                            value={bulkQty}
+                                            onChange={(e) => setBulkQty(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label htmlFor="bulk-size" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Height / Size</Label>
+                                        <Input
+                                            id="bulk-size"
+                                            placeholder="e.g. 2m"
+                                            className="h-8 text-xs bg-white"
+                                            value={bulkSize}
+                                            onChange={(e) => setBulkSize(e.target.value)}
+                                        />
+                                    </div>
+                                    {viewMode === 'quotation' && (
+                                        <div className="space-y-1">
+                                            <Label htmlFor="bulk-rate" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Rate</Label>
+                                            <Input
+                                                id="bulk-rate"
+                                                type="number"
+                                                step="any"
+                                                placeholder="e.g. 150"
+                                                className="h-8 text-xs bg-white"
+                                                value={bulkRate}
+                                                onChange={(e) => setBulkRate(e.target.value)}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 text-xs"
+                                        onClick={() => {
+                                            setSelectedPlantIds([]);
+                                            setBulkRate('');
+                                        }}
+                                        disabled={bulkUpdating}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        className="h-8 text-xs bg-primary text-white hover:bg-primary/95"
+                                        onClick={async () => {
+                                            const qtyVal = bulkQty.trim() ? parseFloat(bulkQty) : undefined;
+                                            const unitVal = bulkUnit.trim() ? bulkUnit : undefined;
+                                            const sizeVal = bulkSize.trim() ? bulkSize : undefined;
+                                            const rateVal = bulkRate.trim() ? parseFloat(bulkRate) : undefined;
+                                            if (qtyVal === undefined && unitVal === undefined && sizeVal === undefined && rateVal === undefined) {
+                                                showAlert('Please enter at least one value to update', 'warning');
+                                                return;
+                                            }
+                                            await handleBulkEdit({
+                                                quantity: qtyVal,
+                                                unit: unitVal,
+                                                optimum_height_size: sizeVal,
+                                                rate: rateVal
+                                            });
+                                            setBulkQty('');
+                                            setBulkUnit('');
+                                            setBulkSize('');
+                                            setBulkRate('');
+                                        }}
+                                        disabled={bulkUpdating}
+                                    >
+                                        {bulkUpdating ? 'Applying…' : 'Apply'}
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* BOQ / Quotation Table View */}
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="bg-muted/30">
+                                        <TableHead className="w-8 font-semibold text-center">#</TableHead>
+                                        <TableHead className="w-10 text-center">
+                                            <input
+                                                type="checkbox"
+                                                checked={filteredSorted.length > 0 && selectedPlantIds.length === filteredSorted.length}
+                                                onChange={(e) => handleSelectAllChange(e.target.checked, filteredSorted)}
+                                                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none accent-primary"
+                                            />
+                                        </TableHead>
+                                        <TableHead className="w-14 text-center font-semibold">Image</TableHead>
+                                        <TableHead className="font-semibold w-36 max-w-[144px] truncate">Common Name</TableHead>
+                                        <TableHead className="font-semibold w-40 max-w-[160px] truncate">Scientific Name</TableHead>
+                                        <TableHead className="font-semibold text-center w-20 min-w-[70px]">Quantity</TableHead>
+                                        <TableHead className="font-semibold text-center w-20 min-w-[70px]">Unit</TableHead>
+                                        <TableHead className="font-semibold text-center w-24 min-w-[90px]">Height / Size (ft)</TableHead>
+                                        {viewMode === 'quotation' && (
+                                            <>
+                                                <TableHead className="font-semibold text-center w-24 min-w-[90px]">Rate</TableHead>
+                                                <TableHead className="font-semibold text-center w-28 min-w-[110px]">Amount</TableHead>
+                                            </>
+                                        )}
+                                        <TableHead className="text-right font-semibold w-10">Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {filteredSorted.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="h-24 text-center text-sm text-muted-foreground">
+                                                No plants found.
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        boqGroups.map(([category, pps]) => (
+                                            <Fragment key={category}>
+                                                {/* Group Header Row */}
+                                                <TableRow className="bg-muted/5 hover:bg-muted/5 border-b border-border/80">
+                                                    <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/10 border-l-[3px] border-primary/70">
+                                                        {category} ({pps.length})
+                                                    </TableCell>
+                                                </TableRow>
+                                                {pps.map((pp, idx) => {
+                                                    if (viewMode === 'boq') {
+                                                        return (
+                                                            <ProjectBoqRow
+                                                                key={pp.plant_id}
+                                                                pp={pp}
+                                                                idx={idx}
+                                                                onDelete={handleDeletePlant}
+                                                                onUpdate={handleUpdateBoqFields}
+                                                                isSelected={selectedPlantIds.includes(pp.plant_id)}
+                                                                onSelectChange={handleSelectChange}
+                                                            />
+                                                        );
+                                                    } else {
+                                                        return (
+                                                            <ProjectQuotationRow
+                                                                key={pp.plant_id}
+                                                                pp={pp}
+                                                                idx={idx}
+                                                                onDelete={handleDeletePlant}
+                                                                onUpdate={handleUpdateBoqFields}
+                                                                isSelected={selectedPlantIds.includes(pp.plant_id)}
+                                                                onSelectChange={handleSelectChange}
+                                                            />
+                                                        );
+                                                    }
+                                                })}
+                                            </Fragment>
+                                        ))
+                                    )}
+                                    {viewMode === 'quotation' && filteredSorted.length > 0 && (
+                                        <TableRow className="bg-muted/20 border-t border-border font-bold">
+                                            <TableCell colSpan={5} className="text-right py-3 px-5 text-foreground font-bold">
+                                                Total Summary:
+                                            </TableCell>
+                                            <TableCell className="text-center py-3 tabular-nums">
+                                                {totalQuotationQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                            </TableCell>
+                                            <TableCell colSpan={3}></TableCell>
+                                            <TableCell className="text-center py-3 tabular-nums text-primary text-base">
+                                                {totalQuotationAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </TableCell>
+                                            <TableCell></TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </>
                 ) : (
                     <>
                         {/* ── Toolbar ── */}
@@ -649,13 +2250,59 @@ export const ProjectDetails = () => {
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="pp-quantity">Quantity</Label>
+                                <Input
+                                    id="pp-quantity"
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    value={quantity}
+                                    onChange={(e) => setQuantity(e.target.value)}
+                                    placeholder="e.g. 15"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="pp-unit">Unit</Label>
+                                <Input
+                                    id="pp-unit"
+                                    value={unit}
+                                    onChange={(e) => setUnit(e.target.value)}
+                                    placeholder="e.g. Nos."
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="pp-height-size">Optimum Height / Size</Label>
+                                <Input
+                                    id="pp-height-size"
+                                    value={optimumHeightSize}
+                                    onChange={(e) => setOptimumHeightSize(e.target.value)}
+                                    placeholder="e.g. 1.5 - 2.0 m"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="pp-rate">Rate</Label>
+                                <Input
+                                    id="pp-rate"
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    value={rate}
+                                    onChange={(e) => setRate(e.target.value)}
+                                    placeholder="e.g. 150.00"
+                                />
+                            </div>
+                        </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="pp-notes">Notes</Label>
                             <Input
                                 id="pp-notes"
                                 value={notes}
                                 onChange={(e) => setNotes(e.target.value)}
-                                placeholder="Location, sizes, quantities…"
+                                placeholder="Special instructions, placement..."
                             />
                         </div>
                         <DialogFooter className="gap-2 sm:gap-0">
