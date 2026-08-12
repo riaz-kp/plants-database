@@ -9,7 +9,7 @@ import type { PlantCreate, Plant } from '../../types/plant';
 
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
-import { plantsQueryOptions, taxonomyTreeQueryOptions, categoriesQueryOptions } from '../../api/queryOptions';
+import { plantsQueryOptions, taxonomyTreeQueryOptions, categoriesQueryOptions, projectsQueryOptions } from '../../api/queryOptions';
 import { aiApi } from '../../api/ai';
 import { cn } from '../../lib-frontend/utils';
 import { TaxonomyFormTable } from './TaxonomyFormTable';
@@ -342,7 +342,11 @@ export const PlantManager = () => {
 
     // Queries
     const searchParams = useSearch({ strict: false }) as { category?: string };
-    const { data: projectsData } = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.getAll() });
+    const { 
+        data: projectsData, 
+        isLoading: isProjectsLoading, 
+        error: projectsError 
+    } = useQuery(projectsQueryOptions());
     
     // Pagination state
     const PAGE_SIZE = 20;
@@ -406,7 +410,9 @@ export const PlantManager = () => {
             );
             return Promise.all(promises);
         },
-        onSuccess: () => {
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
+            queryClient.invalidateQueries({ queryKey: ['project', variables.projectId] });
             showAlert(`Successfully added ${selectedPlantIds.length} plant(s) to project.`, 'success');
             setSelectedPlantIds([]);
             setShowProjectModal(false);
@@ -1345,25 +1351,27 @@ export const PlantManager = () => {
 
                 {/* ── Bulk selection floating toolbar ───────────────────────── */}
                 {!isCreating && !editingPlantId && selectedPlantIds.length > 0 && !showProjectModal && (
-                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-foreground text-background px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 z-50">
-                        <span className="text-sm font-medium">{selectedPlantIds.length} plant(s) selected</span>
-                        <Separator orientation="vertical" className="h-4 bg-background/30" />
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => setShowProjectModal(true)}
-                            className="gap-1.5 text-foreground"
-                        >
-                            <FolderOpen size={13} /> Add to Project
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setSelectedPlantIds([])}
-                            className="gap-1.5 text-background/80 hover:text-background hover:bg-white/10"
-                        >
-                            <X size={13} /> Clear
-                        </Button>
+                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-foreground text-background px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-start gap-2.5 sm:gap-3 z-50 w-[calc(100%-2rem)] sm:w-auto max-w-lg">
+                        <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{selectedPlantIds.length} plant(s) selected</span>
+                        <Separator orientation="vertical" className="hidden sm:block h-4 bg-background/30" />
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setShowProjectModal(true)}
+                                className="flex-1 sm:flex-none gap-1.5 text-foreground h-8 text-xs sm:text-sm"
+                            >
+                                <FolderOpen size={13} /> Add to Project
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setSelectedPlantIds([])}
+                                className="gap-1.5 text-background/80 hover:text-background hover:bg-white/10 h-8 text-xs sm:text-sm"
+                            >
+                                <X size={13} /> Clear
+                            </Button>
+                        </div>
                     </div>
                 )}
 
@@ -1378,9 +1386,26 @@ export const PlantManager = () => {
                                 <SelectValue placeholder="— Choose a Project —" />
                             </SelectTrigger>
                             <SelectContent>
-                                {projectsData?.items?.map(proj => (
-                                    <SelectItem key={proj.id} value={proj.id}>{proj.name} ({proj.client_name})</SelectItem>
-                                ))}
+                                {isProjectsLoading ? (
+                                    <div className="py-2 px-3 text-sm text-muted-foreground flex items-center gap-2">
+                                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        Loading projects...
+                                    </div>
+                                ) : projectsError ? (
+                                    <div className="py-2 px-3 text-sm text-destructive">
+                                        Failed to load projects
+                                    </div>
+                                ) : !projectsData?.items || projectsData.items.length === 0 ? (
+                                    <div className="py-2 px-3 text-sm text-muted-foreground">
+                                        No projects found
+                                    </div>
+                                ) : (
+                                    projectsData.items.map(proj => (
+                                        <SelectItem key={proj.id} value={proj.id}>
+                                            {proj.name} {proj.client_name ? `(${proj.client_name})` : ''}
+                                        </SelectItem>
+                                    ))
+                                )}
                             </SelectContent>
                         </Select>
                         <DialogFooter className="mt-2">

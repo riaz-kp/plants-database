@@ -330,7 +330,7 @@ const ProjectBoqRow = ({
     };
 
     return (
-        <TableRow className={`hover:bg-muted/10 transition-colors focus-within:bg-primary/[0.04] ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+        <TableRow className={`bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
             {/* # */}
             <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
                 {idx + 1}
@@ -388,7 +388,7 @@ const ProjectBoqRow = ({
                     onBlur={() => handleBlur('quantity', localQty)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -401,7 +401,7 @@ const ProjectBoqRow = ({
                     onBlur={() => handleBlur('unit', localUnit)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-muted-foreground focus:text-foreground focus:outline-none text-center"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -414,7 +414,7 @@ const ProjectBoqRow = ({
                     onBlur={() => handleBlur('optimum_height_size', localSize)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -575,7 +575,7 @@ const ProjectQuotationRow = ({
         : null;
 
     return (
-        <TableRow className={`hover:bg-muted/10 transition-colors focus-within:bg-primary/[0.04] ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+        <TableRow className={`bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
             <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
                 {idx + 1}
             </TableCell>
@@ -627,7 +627,7 @@ const ProjectQuotationRow = ({
                     onBlur={() => handleBlur('quantity', localQty)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -639,7 +639,7 @@ const ProjectQuotationRow = ({
                     onBlur={() => handleBlur('unit', localUnit)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-muted-foreground focus:text-foreground focus:outline-none text-center"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -651,7 +651,7 @@ const ProjectQuotationRow = ({
                     onBlur={() => handleBlur('optimum_height_size', localSize)}
                     onKeyDown={handleKeyDown}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -665,7 +665,7 @@ const ProjectQuotationRow = ({
                     onBlur={() => handleBlur('rate', localRate)}
                     onKeyDown={handleKeyDown}
                     placeholder="0.00"
-                    className="w-full text-sm font-semibold bg-muted/30 border border-muted/40 hover:bg-muted/50 focus:bg-white focus:border-primary/50 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -1788,40 +1788,50 @@ export const ProjectDetails = () => {
             <div className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
 
                 {/* Section header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                    <div className="flex items-center gap-2">
-                        <Leaf className="w-4 h-4 text-primary" />
-                        <h2 className="font-semibold text-foreground">Plants List</h2>
-                        <Badge variant="secondary" className="tabular-nums">{project.plants.length}</Badge>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-4 border-b border-border">
+                    {/* Left side / Top row in mobile: Title and Add Button */}
+                    <div className="flex items-center justify-between w-full sm:w-auto gap-4">
+                        <div className="flex items-center gap-2">
+                            <Leaf className="w-4 h-4 text-primary" />
+                            <h2 className="font-semibold text-foreground">Plants List</h2>
+                            <Badge variant="secondary" className="tabular-nums">{project.plants.length}</Badge>
+                        </div>
+                        {/* Only show Add button here on mobile */}
+                        <Button size="sm" onClick={openAdd} className="sm:hidden shrink-0">
+                            <Plus className="w-4 h-4 mr-1.5" />
+                            Add Plant
+                        </Button>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1 border border-border rounded-lg p-0.5 bg-muted/20">
+
+                    {/* Right side / Bottom row in mobile: View toggles and Add Button on desktop */}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                        <div className="flex items-center gap-1 border border-border rounded-lg p-0.5 bg-muted/20 w-full sm:w-auto">
                             <button
                                 type="button"
                                 onClick={() => setViewMode('standard')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'standard' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                className={`flex-1 sm:flex-initial px-3 py-1.5 sm:px-2.5 sm:py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap text-center ${viewMode === 'standard' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                             >
                                 Standard List
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setViewMode('boq')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'boq' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                className={`flex-1 sm:flex-initial px-3 py-1.5 sm:px-2.5 sm:py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap text-center ${viewMode === 'boq' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                             >
                                 BOQ View
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setViewMode('quotation')}
-                                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'quotation' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                className={`flex-1 sm:flex-initial px-3 py-1.5 sm:px-2.5 sm:py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap text-center ${viewMode === 'quotation' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                             >
                                 Quotation View
                             </button>
                         </div>
-                        <Button size="sm" onClick={openAdd}>
+                        {/* Show Add button here on desktop */}
+                        <Button size="sm" onClick={openAdd} className="hidden sm:flex shrink-0">
                             <Plus className="w-4 h-4 mr-2" />
-                            <span className="hidden sm:inline">Add Plant</span>
-                            <span className="sm:hidden">Add</span>
+                            Add Plant
                         </Button>
                     </div>
                 </div>
@@ -2041,8 +2051,8 @@ export const ProjectDetails = () => {
                                         boqGroups.map(([category, pps]) => (
                                             <Fragment key={category}>
                                                 {/* Group Header Row */}
-                                                <TableRow className="bg-muted/5 hover:bg-muted/5 border-b border-border/80">
-                                                    <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/10 border-l-[3px] border-primary/70">
+                                                <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
+                                                    <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
                                                         {category} ({pps.length})
                                                     </TableCell>
                                                 </TableRow>
