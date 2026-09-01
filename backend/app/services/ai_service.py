@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Optional
 from openai import AsyncOpenAI
 from fastapi import HTTPException
@@ -63,25 +64,37 @@ async def generate_plant_details(
         response = await client.chat.completions.create(
             messages=[
                 {
+                    "role": "system",
+                    "content": "You are an expert botanist and horticulturist. Respond ONLY with valid raw JSON matching the requested structure."
+                },
+                {
                     "role": "user",
                     "content": prompt,
                 }
             ],
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.6-27b",
             temperature=0.2,
-            max_tokens=2048,
-            top_p=0.95,
-            response_format={"type": "json_object"}
+            max_tokens=8192,
+            top_p=0.95
         )
         
         response_text = response.choices[0].message.content.strip()
         
+        # Remove reasoning <think>...</think> tags if present
+        response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
+        
         # Strip potential markdown formatting
         if response_text.startswith("```json"):
-            response_text = response_text[7:-3]
+            response_text = response_text[7:-3].strip()
         elif response_text.startswith("```"):
-            response_text = response_text[3:-3]
+            response_text = response_text[3:-3].strip()
             
+        # Extract JSON object from first '{' to last '}'
+        start_idx = response_text.find("{")
+        end_idx = response_text.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            response_text = response_text[start_idx:end_idx + 1]
+
         data = json.loads(response_text)
         
         tax_data = data.get("taxonomy", {})
