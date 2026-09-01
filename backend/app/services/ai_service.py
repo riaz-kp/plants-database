@@ -72,9 +72,9 @@ async def generate_plant_details(
                     "content": prompt,
                 }
             ],
-            model="qwen/qwen3.6-27b",
+            model="groq/compound",
             temperature=0.2,
-            max_tokens=8192,
+            max_tokens=2048,
             top_p=0.95
         )
         
