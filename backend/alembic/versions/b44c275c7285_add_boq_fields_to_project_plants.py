@@ -28,7 +28,8 @@ def upgrade() -> None:
                existing_type=sa.TEXT(),
                type_=sa.String(),
                nullable=False)
-    op.create_index(op.f('ix_categories_name'), 'categories', ['name'], unique=True)
+    # Index already exists on fresh databases (created in 00784fae9404)
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_categories_name ON categories (name)")
     op.drop_constraint('project_share_links_token_key', 'project_share_links', type_='unique')
     op.add_column('projectplants', sa.Column('quantity', sa.Float(), nullable=True))
     op.add_column('projectplants', sa.Column('unit', sa.String(), nullable=True))
