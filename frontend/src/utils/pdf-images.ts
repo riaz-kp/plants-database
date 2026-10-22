@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = `${import.meta.env.VITE_API_URL}/api/v1`;
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((res, rej) => {

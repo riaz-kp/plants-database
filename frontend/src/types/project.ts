@@ -18,6 +18,9 @@ export interface Project {
     description?: string;
     landscape_architect?: string;
     architect?: string;
+    /** Dates printed on the BOQ / quotation exports ("YYYY-MM-DD"); null means today. */
+    boq_date?: string | null;
+    quotation_date?: string | null;
     is_locked: boolean;
     created_at: string;
     updated_at: string;
@@ -31,6 +34,8 @@ export interface ProjectCreate {
     description?: string;
     landscape_architect?: string;
     architect?: string;
+    boq_date?: string | null;
+    quotation_date?: string | null;
 }
 
 export interface ProjectPlantCreate {

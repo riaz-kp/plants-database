@@ -1,6 +1,6 @@
 from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 from app.schemas.plant import PlantResponse
 
@@ -35,6 +35,8 @@ class ProjectBase(BaseModel):
     description: Optional[str] = None
     landscape_architect: Optional[str] = None
     architect: Optional[str] = None
+    boq_date: Optional[date] = None
+    quotation_date: Optional[date] = None
 
 class ProjectCreate(ProjectBase):
     pass
