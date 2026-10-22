@@ -147,7 +147,8 @@ export async function exportProjectQuotationPdf(
     project: Project,
     imgCache: Record<string, string>,
     filename: string,
+    dateStr: string = pdfDate(),
 ): Promise<void> {
-    const doc = <ProjectQuotationPdfDoc project={project} imgCache={imgCache} dateStr={pdfDate()} />;
+    const doc = <ProjectQuotationPdfDoc project={project} imgCache={imgCache} dateStr={dateStr} />;
     downloadBlob(await pdf(doc).toBlob(), `${filename}_Quotation.pdf`);
 }

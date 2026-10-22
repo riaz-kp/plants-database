@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from sqlalchemy import ForeignKey, String, Text, Integer, DateTime
@@ -17,6 +17,9 @@ class Project(Base):
     landscape_architect: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     architect: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_locked: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=sa.false(), nullable=False)
+    # Dates printed on the BOQ / quotation exports (null = today)
+    boq_date: Mapped[Optional[date]] = mapped_column(sa.Date, nullable=True)
+    quotation_date: Mapped[Optional[date]] = mapped_column(sa.Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=sa.text('now()'))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=sa.text('now()'), onupdate=datetime.utcnow)
 

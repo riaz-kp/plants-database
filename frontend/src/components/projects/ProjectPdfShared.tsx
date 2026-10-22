@@ -38,8 +38,12 @@ export const PAGE_STYLE = {
 } as const;
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
-export const pdfDate = () =>
-    new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+/** Long date for documents; `isoDate` ("YYYY-MM-DD") defaults to today. */
+export const pdfDate = (isoDate?: string | null) => {
+    const [y, m, d] = (isoDate ?? '').split('-').map(Number);
+    const date = y && m && d ? new Date(y, m - 1, d) : new Date();
+    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+};
 
 export const fmtMoney = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });

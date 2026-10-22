@@ -115,7 +115,8 @@ export async function exportProjectBoqPdf(
     project: Project,
     imgCache: Record<string, string>,
     filename: string,
+    dateStr: string = pdfDate(),
 ): Promise<void> {
-    const doc = <ProjectBoqPdfDoc project={project} imgCache={imgCache} dateStr={pdfDate()} />;
+    const doc = <ProjectBoqPdfDoc project={project} imgCache={imgCache} dateStr={dateStr} />;
     downloadBlob(await pdf(doc).toBlob(), `${filename}_BOQ.pdf`);
 }
