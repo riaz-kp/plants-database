@@ -87,7 +87,40 @@ import {
     ArrowUpAZ,
     History,
     AlertTriangle,
+    Eye,
+    FolderPlus,
+    Lock,
 } from 'lucide-react';
+
+
+/* ─── Catalog list state (survives opening / editing a plant) ───── */
+
+type SortOrder = 'asc' | 'desc' | 'recent' | 'oldest' | 'sci_asc' | 'sci_desc';
+
+interface CatalogState {
+    page: number;
+    search: string;
+    category: string;
+    indoor: boolean;
+    outdoor: boolean;
+    sort: SortOrder;
+    viewMode: 'card' | 'table';
+}
+
+const CATALOG_STATE_KEY = 'plantCatalogState';
+const LAST_PROJECT_KEY = 'lastProjectId';
+
+const readCatalogState = (): Partial<CatalogState> => {
+    try {
+        return JSON.parse(sessionStorage.getItem(CATALOG_STATE_KEY) || '{}');
+    } catch {
+        return {};
+    }
+};
+
+/** Clicks on these elements must not toggle the row/card selection. */
+const isInteractiveTarget = (target: EventTarget) =>
+    !!(target as Element).closest('button, a, input, .actions-menu-container');
 
 
 /* ─── Memoized List Items ────────────────────────────────────────── */
@@ -99,20 +132,23 @@ interface PlantItemProps {
     onEdit: (plant: Plant) => void;
     onDelete: (id: string, name: string) => void;
     onAddToProject: (id: string) => void;
+    onOpen: (id: string) => void;
     onClick: (id: string, e: React.MouseEvent) => void;
 }
 
-const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onClick }: PlantItemProps) => {
+const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onOpen, onClick }: PlantItemProps) => {
     const displayImage = plant.image_url || plant.icon_url;
     return (
         <Card
             role="button"
             tabIndex={0}
             onClick={(e) => onClick(plant.id, e)}
+            aria-pressed={isSelected}
             onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    onClick(plant.id, e as any);
+                    onSelect(plant.id);
                 }
             }}
             className={cn(
@@ -143,26 +179,33 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
                     />
                 </div>
 
-                <div 
-                    className="absolute top-2 right-2 z-10 actions-menu-container" 
+                <div
+                    className="absolute top-2 right-2 z-10 actions-menu-container flex items-center gap-1.5"
                     role="presentation"
                     onClick={e => e.stopPropagation()}
                 >
+                    <Button
+                        variant="secondary"
+                        size="icon"
+                        title="Add to project"
+                        aria-label={`Add ${plant.common_name} to project`}
+                        onClick={() => onAddToProject(plant.id)}
+                        className="h-8 w-8 rounded-full bg-black/20 hover:bg-black/40 border-0 text-white backdrop-blur-md shadow-sm"
+                    >
+                        <FolderPlus size={15} />
+                    </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button
                                 variant="secondary"
                                 size="icon"
+                                aria-label="More actions"
                                 className="h-8 w-8 rounded-full bg-black/20 hover:bg-black/40 border-0 text-white backdrop-blur-md shadow-sm"
                             >
                                 <MoreVertical size={16} />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
-                                <FolderOpen className="mr-2 h-4 w-4" />
-                                <span>Add to Project</span>
-                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onEdit(plant)}>
                                 <Pencil className="mr-2 h-4 w-4" />
                                 <span>Edit</span>
@@ -192,20 +235,30 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
                     )}
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 mt-auto">
-                    <Badge variant="secondary" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold bg-secondary/50 border-secondary/20">
-                        {plant.category}
-                    </Badge>
-                    <Badge variant="outline" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold border-muted-foreground/20 text-muted-foreground/90">
-                        {plant.planting_place}
-                    </Badge>
+                <div className="flex items-end justify-between gap-2 mt-auto">
+                    <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="secondary" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold bg-secondary/50 border-secondary/20">
+                            {plant.category}
+                        </Badge>
+                        <Badge variant="outline" className="px-1.5 py-0 h-5 text-[9px] uppercase tracking-wider font-bold border-muted-foreground/20 text-muted-foreground/90">
+                            {plant.planting_place}
+                        </Badge>
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onOpen(plant.id)}
+                        className="h-7 px-2.5 text-xs gap-1 shrink-0"
+                    >
+                        <Eye size={13} /> Details
+                    </Button>
                 </div>
             </CardContent>
         </Card>
     );
 });
 
-const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onClick }: PlantItemProps) => {
+const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onAddToProject, onOpen, onClick }: PlantItemProps) => {
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') {
             const input = e.currentTarget;
@@ -239,6 +292,7 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
         <TableRow
             key={plant.id}
             onClick={(e) => onClick(plant.id, e)}
+            aria-selected={isSelected}
             className={cn(
                 "cursor-pointer select-none transition-colors focus-within:bg-primary/[0.04]",
                 isSelected ? 'bg-primary/5 hover:bg-primary/10' : ''
@@ -277,22 +331,40 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
             <TableCell className="hidden md:table-cell">
                 <Badge variant="outline" className="text-[10px] uppercase tracking-wide font-bold">{plant.planting_place}</Badge>
             </TableCell>
-            <TableCell className="actions-menu-container" onClick={e => e.stopPropagation()}>
+            <TableCell className="actions-menu-container px-2" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-end gap-0.5">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Add to project"
+                    aria-label={`Add ${plant.common_name} to project`}
+                    onClick={() => onAddToProject(plant.id)}
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
+                >
+                    <FolderPlus size={15} />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    title="View details"
+                    aria-label={`View ${plant.common_name} details`}
+                    onClick={() => onOpen(plant.id)}
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
+                >
+                    <Eye size={15} />
+                </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground"
+                            aria-label="More actions"
+                            className="h-8 w-8 text-muted-foreground"
                         >
                             <MoreVertical size={14} />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
-                            <FolderOpen className="mr-2 h-4 w-4" />
-                            <span>Add to Project</span>
-                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => onEdit(plant)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             <span>Edit</span>
@@ -306,6 +378,7 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
+                </div>
             </TableCell>
         </TableRow>
     );
@@ -318,9 +391,19 @@ export const PlantManager = () => {
     const { showAlert } = useAlert();
     const { confirm } = useConfirm();
 
+    const searchParams = useSearch({ strict: false }) as { category?: string };
+    const [savedState] = useState(() => {
+        const saved = readCatalogState();
+        // A ?category= link (e.g. from Categories) starts a fresh, filtered list
+        if (searchParams.category && searchParams.category !== saved.category) {
+            return { ...saved, category: searchParams.category, page: 1 };
+        }
+        return saved;
+    });
+
     const [isCreating, setIsCreating] = useState(false);
     const [editingPlantId, setEditingPlantId] = useState<string | null>(null);
-    const [viewMode, setViewMode] = useState<'card' | 'table'>('table');
+    const [viewMode, setViewMode] = useState<'card' | 'table'>(savedState.viewMode ?? 'table');
 
     const [selectedPlantIds, setSelectedPlantIds] = useState<string[]>(() => {
         const saved = sessionStorage.getItem('plantSelection');
@@ -331,7 +414,10 @@ export const PlantManager = () => {
         sessionStorage.setItem('plantSelection', JSON.stringify(selectedPlantIds));
     }, [selectedPlantIds]);
 
-    const [showProjectModal, setShowProjectModal] = useState(false);
+    // Plants the "Add to Project" dialog is acting on (null = dialog closed).
+    // Kept separate from the selection so a single-plant add doesn't wipe it.
+    const [projectModalPlantIds, setProjectModalPlantIds] = useState<string[] | null>(null);
+    const showProjectModal = projectModalPlantIds !== null;
     const [selectedProjectId, setSelectedProjectId] = useState<string>('');
 
     const toggleSelection = useCallback((id: string) => {
@@ -341,30 +427,50 @@ export const PlantManager = () => {
     }, []);
 
     // Queries
-    const searchParams = useSearch({ strict: false }) as { category?: string };
-    const { 
-        data: projectsData, 
-        isLoading: isProjectsLoading, 
-        error: projectsError 
+    const {
+        data: projectsData,
+        isLoading: isProjectsLoading,
+        error: projectsError
     } = useQuery(projectsQueryOptions());
-    
+
     // Pagination state
     const PAGE_SIZE = 20;
-    const [currentPage, setCurrentPage] = useState(1);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [currentPage, setCurrentPage] = useState(savedState.page ?? 1);
+    const [searchTerm, setSearchTerm] = useState(savedState.search ?? '');
+    const [debouncedSearch, setDebouncedSearch] = useState(savedState.search ?? '');
 
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(searchTerm), 500);
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
-    const [filterCategory, setFilterCategory] = useState<string>(
-        () => searchParams.category ?? '__all__'
-    );
-    const [filterIndoor, setFilterIndoor] = useState(false);
-    const [filterOutdoor, setFilterOutdoor] = useState(false);
-    const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'recent' | 'oldest' | 'sci_asc' | 'sci_desc'>('recent');
+    const [filterCategory, setFilterCategory] = useState<string>(savedState.category ?? '__all__');
+    const [filterIndoor, setFilterIndoor] = useState(savedState.indoor ?? false);
+    const [filterOutdoor, setFilterOutdoor] = useState(savedState.outdoor ?? false);
+    const [sortOrder, setSortOrder] = useState<SortOrder>(savedState.sort ?? 'recent');
+
+    useEffect(() => {
+        const state: CatalogState = {
+            page: currentPage, search: searchTerm, category: filterCategory,
+            indoor: filterIndoor, outdoor: filterOutdoor, sort: sortOrder, viewMode,
+        };
+        sessionStorage.setItem(CATALOG_STATE_KEY, JSON.stringify(state));
+    }, [currentPage, searchTerm, filterCategory, filterIndoor, filterOutdoor, sortOrder, viewMode]);
+
+    // The ?category= param has been applied; drop it so Back returns to the saved list
+    useEffect(() => {
+        if (searchParams.category) {
+            navigate({ to: '/plants', search: {} as any, replace: true });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Changing what is listed starts again from page 1
+    const changeSearch = (value: string) => { setSearchTerm(value); setCurrentPage(1); };
+    const changeCategory = (value: string) => { setFilterCategory(value); setCurrentPage(1); };
+    const changeSort = (value: SortOrder) => { setSortOrder(value); setCurrentPage(1); };
+    const toggleIndoor = () => { setFilterIndoor(v => !v); setCurrentPage(1); };
+    const toggleOutdoor = () => { setFilterOutdoor(v => !v); setCurrentPage(1); };
 
     const plantingPlace = (filterIndoor && filterOutdoor) ? PlantingPlace.BOTH
                             : filterIndoor ? PlantingPlace.INDOOR
@@ -386,6 +492,11 @@ export const PlantManager = () => {
     const totalPlantsInDb = plantsData?.total || 0;
     const totalPages = Math.max(1, Math.ceil(totalPlantsInDb / PAGE_SIZE));
 
+    // A restored page may no longer exist (e.g. plants were deleted meanwhile)
+    useEffect(() => {
+        if (plantsData && currentPage > totalPages) setCurrentPage(totalPages);
+    }, [plantsData, currentPage, totalPages]);
+
     // Prefetch functionality
     useEffect(() => {
         if (currentPage < totalPages) {
@@ -402,21 +513,37 @@ export const PlantManager = () => {
     const { data: categoriesOptions } = useQuery(categoriesQueryOptions());
 
 
+    // Pre-select the project plants were last added to, else the most recently updated one
+    const projectOptions = projectsData?.items ?? [];
+    const lastProjectId = (() => {
+        try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+    })();
+    useEffect(() => {
+        if (!showProjectModal || projectOptions.length === 0) return;
+        const current = projectOptions.find(p => p.id === selectedProjectId && !p.is_locked);
+        if (current) return;
+        const remembered = projectOptions.find(p => p.id === lastProjectId && !p.is_locked);
+        const fallback = projectOptions.find(p => !p.is_locked);
+        setSelectedProjectId((remembered ?? fallback)?.id ?? '');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showProjectModal, projectsData]);
+
     // Mutations
     const addPlantsToProjectMutation = useMutation({
-        mutationFn: async (args: { projectId: string; plantIds: string[] }) => {
-            const promises = args.plantIds.map(plantId =>
-                projectsApi.addPlant(args.projectId, { plant_id: plantId, notes: '' })
-            );
-            return Promise.all(promises);
-        },
-        onSuccess: (_, variables) => {
+        mutationFn: (args: { projectId: string; plantIds: string[] }) =>
+            projectsApi.addPlantsBulk(args.projectId, args.plantIds),
+        onSuccess: (result, variables) => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             queryClient.invalidateQueries({ queryKey: ['project', variables.projectId] });
-            showAlert(`Successfully added ${selectedPlantIds.length} plant(s) to project.`, 'success');
-            setSelectedPlantIds([]);
-            setShowProjectModal(false);
-            setSelectedProjectId('');
+            try { localStorage.setItem(LAST_PROJECT_KEY, variables.projectId); } catch { /* storage unavailable */ }
+            const projectName = projectOptions.find(p => p.id === variables.projectId)?.name ?? 'project';
+            const skippedNote = result.skipped ? ` (${result.skipped} already in it)` : '';
+            showAlert(`Added ${result.added} plant(s) to ${projectName}${skippedNote}.`, 'success');
+            // Only clear the selection when the selection itself was added
+            const addedSelection = variables.plantIds.length === selectedPlantIds.length
+                && variables.plantIds.every(id => selectedPlantIds.includes(id));
+            if (addedSelection) setSelectedPlantIds([]);
+            setProjectModalPlantIds(null);
         },
         onError: (error: any) => {
             showAlert("Failed to add plants to project: " + (error.response?.data?.detail || error.message), 'error');
@@ -649,16 +776,18 @@ export const PlantManager = () => {
     }, [confirm, deleteMutation]);
 
 
+    // Tapping a tile/row marks it; details open from the explicit button
     const handleRowClick = useCallback((id: string, e: React.MouseEvent) => {
-        if ((e.target as Element).closest('.actions-menu-container') ||
-            (e.target as Element).closest('.dropdown-menu') ||
-            (e.target as Element).tagName.toLowerCase() === 'input') return;
-        navigate({ to: `/plants/${id}` as any });
+        if (isInteractiveTarget(e.target)) return;
+        toggleSelection(id);
+    }, [toggleSelection]);
+
+    const openDetails = useCallback((id: string) => {
+        navigate({ to: '/plants/$id', params: { id } });
     }, [navigate]);
 
     const openSingleProjectModal = useCallback((plantId: string) => {
-        setSelectedPlantIds([plantId]);
-        setShowProjectModal(true);
+        setProjectModalPlantIds([plantId]);
     }, []);
 
     const cancelEdit = useCallback(() => {
@@ -738,9 +867,6 @@ export const PlantManager = () => {
     };
 
     const displayedPlants = plants;
-
-    // Reset to page 1 when filters/search change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, filterCategory, filterIndoor, filterOutdoor, sortOrder]);
 
     // ─── Reusable label ───────────────────────────────────────────────────────
     const FieldLabel = ({ children }: { children: React.ReactNode }) => (
@@ -837,12 +963,12 @@ export const PlantManager = () => {
                                 <Input
                                     placeholder="Search catalog..."
                                     value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
+                                    onChange={e => changeSearch(e.target.value)}
                                     className="h-9 bg-background/50 backdrop-blur-sm pr-8 placeholder:text-muted-foreground/60 border-border/50 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all shadow-sm"
                                 />
                                 {searchTerm && (
                                     <button
-                                        onClick={() => setSearchTerm('')}
+                                        onClick={() => changeSearch('')}
                                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
                                     >
                                         <XCircle size={14} />
@@ -853,7 +979,7 @@ export const PlantManager = () => {
                             {/* Filters Row: Category + Place + Sort in one scrollable line */}
                             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
                                 {/* Category */}
-                                <Select value={filterCategory} onValueChange={setFilterCategory}>
+                                <Select value={filterCategory} onValueChange={changeCategory}>
                                     <SelectTrigger className="w-[140px] shrink-0 h-9 bg-background/50 backdrop-blur-sm border-border/50 focus:ring-0 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-primary/20 shadow-sm transition-all">
                                         <SelectValue placeholder="Categories" />
                                     </SelectTrigger>
@@ -868,7 +994,7 @@ export const PlantManager = () => {
                                 {/* Indoor/Outdoor Toggle Group Style */}
                                 <div className="flex items-center shrink-0 h-9 p-1 rounded-md border border-border/50 bg-background/50 backdrop-blur-sm shadow-sm gap-1">
                                     <button
-                                        onClick={() => setFilterIndoor(!filterIndoor)}
+                                        onClick={toggleIndoor}
                                         className={cn(
                                             "pl-2 pr-3 h-full rounded text-[9px] font-bold uppercase tracking-widest transition-all duration-200 flex items-center gap-2",
                                             filterIndoor ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground/70 hover:bg-muted hover:text-foreground"
@@ -885,7 +1011,7 @@ export const PlantManager = () => {
                                         Indoor
                                     </button>
                                     <button
-                                        onClick={() => setFilterOutdoor(!filterOutdoor)}
+                                        onClick={toggleOutdoor}
                                         className={cn(
                                             "pl-2 pr-3 h-full rounded text-[9px] font-bold uppercase tracking-widest transition-all duration-200 flex items-center gap-2",
                                             filterOutdoor ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground/70 hover:bg-muted hover:text-foreground"
@@ -904,7 +1030,7 @@ export const PlantManager = () => {
                                 </div>
 
                                 {/* Sort */}
-                                <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
+                                <Select value={sortOrder} onValueChange={(v) => changeSort(v as SortOrder)}>
                                     <SelectTrigger className="w-[48px] shrink-0 h-9 bg-background/50 backdrop-blur-sm border-border/50 px-0 flex justify-center focus:ring-0 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-primary/20 shadow-sm transition-all">
                                         <SelectValue>
                                             <div className="flex items-center justify-center w-full">
@@ -1248,6 +1374,7 @@ export const PlantManager = () => {
                                     onEdit={handleEdit}
                                     onDelete={handleDelete}
                                     onAddToProject={openSingleProjectModal}
+                                    onOpen={openDetails}
                                     onClick={handleRowClick}
                                 />
                             ))}
@@ -1269,7 +1396,7 @@ export const PlantManager = () => {
                                         <TableHead className="w-11 px-2">Icon</TableHead>
                                         <TableHead
                                             className="cursor-pointer hover:text-foreground transition-colors group"
-                                            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                                            onClick={() => changeSort(sortOrder === 'asc' ? 'desc' : 'asc')}
                                         >
                                             <div className="flex items-center gap-1.5">
                                                 Common Name
@@ -1283,7 +1410,7 @@ export const PlantManager = () => {
                                         </TableHead>
                                         <TableHead
                                             className="hidden sm:table-cell cursor-pointer hover:text-foreground transition-colors group"
-                                            onClick={() => setSortOrder(sortOrder === 'sci_asc' ? 'sci_desc' : 'sci_asc')}
+                                            onClick={() => changeSort(sortOrder === 'sci_asc' ? 'sci_desc' : 'sci_asc')}
                                         >
                                             <div className="flex items-center gap-1.5">
                                                 Scientific Name
@@ -1310,7 +1437,8 @@ export const PlantManager = () => {
                                             onEdit={handleEdit}
                                             onDelete={handleDelete}
                                             onAddToProject={openSingleProjectModal}
-                                            onClick={handleRowClick}
+                                            onOpen={openDetails}
+                                    onClick={handleRowClick}
                                         />
                                     ))}
                                 </TableBody>
@@ -1358,7 +1486,7 @@ export const PlantManager = () => {
                             <Button
                                 size="sm"
                                 variant="secondary"
-                                onClick={() => setShowProjectModal(true)}
+                                onClick={() => setProjectModalPlantIds(selectedPlantIds)}
                                 className="flex-1 sm:flex-none gap-1.5 text-foreground h-8 text-xs sm:text-sm"
                             >
                                 <FolderOpen size={13} /> Add to Project
@@ -1376,10 +1504,20 @@ export const PlantManager = () => {
                 )}
 
                 {/* ── Add to Project Dialog ─────────────────────────────────── */}
-                <Dialog open={showProjectModal} onOpenChange={setShowProjectModal}>
+                <Dialog
+                    open={showProjectModal}
+                    onOpenChange={(open) => { if (!open && !addPlantsToProjectMutation.isPending) setProjectModalPlantIds(null); }}
+                >
                     <DialogContent className="max-w-md">
                         <DialogHeader>
-                            <DialogTitle>Add {selectedPlantIds.length} Plant(s) to Project</DialogTitle>
+                            <DialogTitle>
+                                {projectModalPlantIds?.length === 1
+                                    ? `Add ${plants.find(p => p.id === projectModalPlantIds[0])?.common_name ?? '1 plant'} to Project`
+                                    : `Add ${projectModalPlantIds?.length ?? 0} Plants to Project`}
+                            </DialogTitle>
+                            <DialogDescription>
+                                Pre-selected: the project you last added plants to. Plants already in the project keep their quantities.
+                            </DialogDescription>
                         </DialogHeader>
                         <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
                             <SelectTrigger>
@@ -1401,18 +1539,30 @@ export const PlantManager = () => {
                                     </div>
                                 ) : (
                                     projectsData.items.map(proj => (
-                                        <SelectItem key={proj.id} value={proj.id}>
-                                            {proj.name} {proj.client_name ? `(${proj.client_name})` : ''}
+                                        <SelectItem key={proj.id} value={proj.id} disabled={proj.is_locked}>
+                                            <span className="flex items-center gap-1.5">
+                                                {proj.is_locked && <Lock size={12} className="text-muted-foreground" />}
+                                                {proj.name} {proj.client_name ? `(${proj.client_name})` : ''}
+                                                {proj.id === lastProjectId && !proj.is_locked && (
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">· Last used</span>
+                                                )}
+                                            </span>
                                         </SelectItem>
                                     ))
                                 )}
                             </SelectContent>
                         </Select>
                         <DialogFooter className="mt-2">
-                            <Button variant="outline" onClick={() => setShowProjectModal(false)}>Cancel</Button>
                             <Button
-                                disabled={!selectedProjectId || addPlantsToProjectMutation.isPending}
-                                onClick={() => addPlantsToProjectMutation.mutate({ projectId: selectedProjectId, plantIds: selectedPlantIds })}
+                                variant="outline"
+                                disabled={addPlantsToProjectMutation.isPending}
+                                onClick={() => setProjectModalPlantIds(null)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                disabled={!selectedProjectId || !projectModalPlantIds?.length || addPlantsToProjectMutation.isPending}
+                                onClick={() => projectModalPlantIds && addPlantsToProjectMutation.mutate({ projectId: selectedProjectId, plantIds: projectModalPlantIds })}
                                 className="gap-1.5"
                             >
                                 {addPlantsToProjectMutation.isPending ? <><Loader2 size={13} className="animate-spin" /> Adding…</> : 'Add Plants'}

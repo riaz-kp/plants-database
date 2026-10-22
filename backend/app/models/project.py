@@ -14,6 +14,9 @@ class Project(Base):
     client_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    landscape_architect: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    architect: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_locked: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=sa.false(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=sa.text('now()'))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=sa.text('now()'), onupdate=datetime.utcnow)
 

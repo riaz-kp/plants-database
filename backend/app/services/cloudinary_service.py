@@ -1,3 +1,5 @@
+import asyncio
+
 import cloudinary
 import cloudinary.uploader
 import httpx
@@ -27,8 +29,9 @@ async def upload_image(file: UploadFile, folder: str = "plants") -> str:
         # Read the file content
         contents = await file.read()
         
-        # Upload using cloudinary
-        upload_result = cloudinary.uploader.upload(
+        # Upload using cloudinary (the SDK is blocking, so keep it off the event loop)
+        upload_result = await asyncio.to_thread(
+            cloudinary.uploader.upload,
             contents,
             folder=folder,
             resource_type="image"
@@ -64,7 +67,8 @@ async def upload_image_from_url(url: str, folder: str = "plants") -> str:
             response.raise_for_status()
             image_bytes = response.content
 
-        upload_result = cloudinary.uploader.upload(
+        upload_result = await asyncio.to_thread(
+            cloudinary.uploader.upload,
             image_bytes,
             folder=folder,
             resource_type="image"

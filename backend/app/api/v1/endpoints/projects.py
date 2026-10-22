@@ -14,10 +14,19 @@ from app.db.session import get_db
 from app.models.project import Project, ProjectPlant
 from app.models.plant import Plant
 from app.models.share_link import ProjectShareLink
-from app.schemas.project import ProjectCreate, ProjectResponse, ProjectPlantCreate, ProjectUpdate, ProjectListResponse
+from app.schemas.project import (
+    ProjectCreate, ProjectResponse, ProjectPlantCreate, ProjectUpdate, ProjectListResponse,
+    ProjectLockUpdate, ProjectPlantsBulkCreate, ProjectPlantsBulkResult,
+)
 from app.core.security import get_current_user
 
 router = APIRouter()
+
+
+def _ensure_unlocked(project: Project) -> None:
+    """Reject modifications to a locked project."""
+    if project.is_locked:
+        raise HTTPException(status_code=423, detail="Project is locked. Unlock it to make changes.")
 
 @router.get("/", response_model=ProjectListResponse, dependencies=[Depends(get_current_user)])
 async def read_projects(
@@ -150,6 +159,7 @@ async def add_plant_to_project(
     project = result.scalars().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
 
     # Check if plant exists
     result = await db.execute(select(Plant).filter(Plant.id == plant_in.plant_id))
@@ -198,6 +208,74 @@ async def add_plant_to_project(
     result = await db.execute(query)
     return result.scalars().first()
 
+@router.post("/{project_id}/plants/bulk", response_model=ProjectPlantsBulkResult, dependencies=[Depends(get_current_user)])
+async def add_plants_to_project_bulk(
+    *,
+    db: AsyncSession = Depends(get_db),
+    project_id: uuid.UUID,
+    plants_in: ProjectPlantsBulkCreate
+) -> Any:
+    """
+    Add many plants to a project in one transaction.
+    Plants already in the project are left untouched (their BOQ data is kept).
+    """
+    result = await db.execute(select(Project).filter(Project.id == project_id))
+    project = result.scalars().first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
+
+    requested = list(dict.fromkeys(plants_in.plant_ids))
+    if not requested:
+        return {"added": 0, "skipped": 0}
+
+    result = await db.execute(select(Plant.id).filter(Plant.id.in_(requested)))
+    existing_plant_ids = set(result.scalars().all())
+    missing = [pid for pid in requested if pid not in existing_plant_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"{len(missing)} plant(s) not found")
+
+    result = await db.execute(
+        select(ProjectPlant.plant_id).filter(
+            ProjectPlant.project_id == project_id,
+            ProjectPlant.plant_id.in_(requested)
+        )
+    )
+    already_in_project = set(result.scalars().all())
+
+    to_add = [pid for pid in requested if pid not in already_in_project]
+    for pid in to_add:
+        db.add(ProjectPlant(project_id=project_id, plant_id=pid))
+
+    if to_add:
+        project.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"added": len(to_add), "skipped": len(already_in_project)}
+
+@router.patch("/{project_id}/lock", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
+async def set_project_lock(
+    *,
+    db: AsyncSession = Depends(get_db),
+    project_id: uuid.UUID,
+    lock_in: ProjectLockUpdate
+) -> Any:
+    """
+    Lock or unlock a project. A locked project rejects all edits until unlocked.
+    """
+    result = await db.execute(select(Project).filter(Project.id == project_id))
+    project = result.scalars().first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project.is_locked = lock_in.is_locked
+    await db.commit()
+
+    query = select(Project).filter(Project.id == project_id).options(
+        selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
+    )
+    result = await db.execute(query)
+    return result.scalars().first()
+
 @router.put("/{project_id}/plants/{plant_id}", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
 async def update_plant_in_project(
     *,
@@ -213,6 +291,7 @@ async def update_plant_in_project(
     project = result.scalars().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
 
     result = await db.execute(
         select(ProjectPlant).filter(
@@ -254,6 +333,7 @@ async def remove_plant_from_project(
     project = result.scalars().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
 
     result = await db.execute(
         select(ProjectPlant).filter(
@@ -290,6 +370,7 @@ async def update_project(
     project = result.scalars().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
 
     update_data = project_in.model_dump(exclude_unset=True)
     for field in update_data:
@@ -320,6 +401,7 @@ async def delete_project(
     project = result.scalars().first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
     
     await db.delete(project)
     await db.commit()
@@ -349,7 +431,9 @@ async def duplicate_project(
         name=f"{source_project.name} (Copy)",
         client_name=source_project.client_name,
         location=source_project.location,
-        description=source_project.description
+        description=source_project.description,
+        landscape_architect=source_project.landscape_architect,
+        architect=source_project.architect,
     )
     db.add(new_project)
     await db.commit()

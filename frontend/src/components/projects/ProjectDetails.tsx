@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft, Download, Plus, Pencil, Trash2, Leaf,
     User, MapPin, ExternalLink, Search, ChevronUp, ChevronDown,
-    ChevronsUpDown, ChevronLeft, ChevronRight,
+    ChevronsUpDown, Lock, LockOpen,
     Link2, Copy, Check, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
@@ -15,9 +15,10 @@ import { projectsApi } from '../../api/projects';
 import type { ShareLinkInfo } from '../../api/projects';
 import { plantsApi } from '../../api/plants';
 import { taxonomyApi } from '../../api/taxonomy';
-import type { ProjectPlantCreate } from '../../types/project';
+import type { ProjectPlantCreate, ProjectCreate } from '../../types/project';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { ProjectFormDialog } from './ProjectFormDialog';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,7 +53,12 @@ import {
 type SortKey = 'common_name' | 'scientific_name' | 'category' | 'planting_place' | 'notes';
 type SortDir = 'asc' | 'desc';
 
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 50];
+// BOQ / quotation: image + common name stay visible while scrolling sideways.
+// Solid backgrounds so the scrolled columns slide underneath them.
+const STICKY_IMG = 'sticky left-0 z-10 w-16 min-w-16 max-w-16 px-2';
+const STICKY_NAME = 'sticky left-16 z-10 w-[120px] min-w-[120px] max-w-[120px] sm:w-36 sm:min-w-36 sm:max-w-36 border-r border-border/60 shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]';
+const STICKY_ROW_BG = 'bg-[#fcfbfa] group-hover:bg-[#f9f7f4] group-focus-within:bg-[#f7f5f1]';
+const STICKY_HEAD_BG = 'bg-[#f7f5f1]';
 
 /* ── SortHeader helper ── */
 function SortTh({
@@ -82,18 +88,17 @@ function SortTh({
 interface ProjectPlantRowProps {
     pp: any;
     idx: number;
-    safePage: number;
-    pageSize: number;
+    locked: boolean;
     onEdit: (plantId: string, notes: string) => void;
     onDelete: (plantId: string, plantName: string) => void;
 }
 
-const ProjectPlantRowMemo = memo(({ pp, idx, safePage, pageSize, onEdit, onDelete }: ProjectPlantRowProps) => {
+const ProjectPlantRowMemo = memo(({ pp, idx, locked, onEdit, onDelete }: ProjectPlantRowProps) => {
     return (
         <TableRow key={pp.plant_id} className="hover:bg-muted/20 transition-colors">
             {/* # */}
             <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
-                {(safePage - 1) * pageSize + idx + 1}
+                {idx + 1}
             </TableCell>
 
             {/* Plant */}
@@ -179,6 +184,9 @@ const ProjectPlantRowMemo = memo(({ pp, idx, safePage, pageSize, onEdit, onDelet
 
             {/* Actions */}
             <TableCell className="text-right">
+                {locked ? (
+                    <Lock className="w-3.5 h-3.5 ml-auto text-muted-foreground/40" aria-label="Locked" />
+                ) : (
                 <div className="flex items-center justify-end gap-1">
                     <Button
                         variant="ghost" size="icon"
@@ -197,6 +205,7 @@ const ProjectPlantRowMemo = memo(({ pp, idx, safePage, pageSize, onEdit, onDelet
                         <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                 </div>
+                )}
             </TableCell>
         </TableRow>
     );
@@ -208,6 +217,7 @@ const ProjectBoqRow = ({
     onDelete,
     onUpdate,
     isSelected,
+    locked,
     onSelectChange
 }: {
     pp: any;
@@ -215,6 +225,7 @@ const ProjectBoqRow = ({
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
+    locked: boolean;
     onSelectChange: (plantId: string, selected: boolean) => void;
 }) => {
     const [localQty, setLocalQty] = useState(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
@@ -330,7 +341,7 @@ const ProjectBoqRow = ({
     };
 
     return (
-        <TableRow className={`bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+        <TableRow className={`group bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
             {/* # */}
             <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
                 {idx + 1}
@@ -341,6 +352,7 @@ const ProjectBoqRow = ({
                 <input
                     type="checkbox"
                     checked={isSelected}
+                    disabled={locked}
                     onChange={(e) => {
                         onSelectChange(pp.plant_id, e.target.checked);
                         e.target.focus();
@@ -351,7 +363,7 @@ const ProjectBoqRow = ({
             </TableCell>
 
             {/* Image */}
-            <TableCell className="w-14">
+            <TableCell className={`${STICKY_IMG} ${STICKY_ROW_BG}`}>
                 <div className="flex justify-center">
                     {pp.plant?.icon_url ? (
                         <img
@@ -368,7 +380,7 @@ const ProjectBoqRow = ({
             </TableCell>
 
             {/* Common Name */}
-            <TableCell className="font-semibold text-foreground w-36 max-w-[144px] truncate">
+            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
                 {pp.plant?.common_name || '—'}
             </TableCell>
 
@@ -387,8 +399,9 @@ const ProjectBoqRow = ({
                     onChange={(e) => setLocalQty(e.target.value)}
                     onBlur={() => handleBlur('quantity', localQty)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -400,8 +413,9 @@ const ProjectBoqRow = ({
                     onChange={(e) => setLocalUnit(e.target.value)}
                     onBlur={() => handleBlur('unit', localUnit)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -413,14 +427,18 @@ const ProjectBoqRow = ({
                     onChange={(e) => setLocalSize(e.target.value)}
                     onBlur={() => handleBlur('optimum_height_size', localSize)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
             {/* Actions */}
             <TableCell className="text-right w-10">
                 <div className="flex items-center justify-end gap-1">
+                    {locked ? (
+                        <Lock className="w-3.5 h-3.5 text-muted-foreground/40" aria-label="Locked" />
+                    ) : (
                     <Button
                         variant="ghost" size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive"
@@ -429,6 +447,7 @@ const ProjectBoqRow = ({
                     >
                         <Trash2 className="w-3.5 h-3.5" />
                     </Button>
+                    )}
                 </div>
             </TableCell>
         </TableRow>
@@ -441,6 +460,7 @@ const ProjectQuotationRow = ({
     onDelete,
     onUpdate,
     isSelected,
+    locked,
     onSelectChange
 }: {
     pp: any;
@@ -448,6 +468,7 @@ const ProjectQuotationRow = ({
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
+    locked: boolean;
     onSelectChange: (plantId: string, selected: boolean) => void;
 }) => {
     const [localQty, setLocalQty] = useState(pp.quantity !== undefined && pp.quantity !== null ? String(pp.quantity) : '');
@@ -575,7 +596,7 @@ const ProjectQuotationRow = ({
         : null;
 
     return (
-        <TableRow className={`bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
+        <TableRow className={`group bg-muted/10 hover:bg-muted/18 focus-within:bg-muted/25 transition-colors ${saving ? 'opacity-70 bg-muted/5' : ''}`}>
             <TableCell className="text-center font-medium text-xs tabular-nums text-muted-foreground w-8">
                 {idx + 1}
             </TableCell>
@@ -584,6 +605,7 @@ const ProjectQuotationRow = ({
                 <input
                     type="checkbox"
                     checked={isSelected}
+                    disabled={locked}
                     onChange={(e) => {
                         onSelectChange(pp.plant_id, e.target.checked);
                         e.target.focus();
@@ -593,7 +615,7 @@ const ProjectQuotationRow = ({
                 />
             </TableCell>
 
-            <TableCell className="w-14">
+            <TableCell className={`${STICKY_IMG} ${STICKY_ROW_BG}`}>
                 <div className="flex justify-center">
                     {pp.plant?.icon_url ? (
                         <img
@@ -609,7 +631,7 @@ const ProjectQuotationRow = ({
                 </div>
             </TableCell>
 
-            <TableCell className="font-semibold text-foreground w-36 max-w-[144px] truncate">
+            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
                 {pp.plant?.common_name || '—'}
             </TableCell>
 
@@ -626,8 +648,9 @@ const ProjectQuotationRow = ({
                     onChange={(e) => setLocalQty(e.target.value)}
                     onBlur={() => handleBlur('quantity', localQty)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -638,8 +661,9 @@ const ProjectQuotationRow = ({
                     onChange={(e) => setLocalUnit(e.target.value)}
                     onBlur={() => handleBlur('unit', localUnit)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -650,8 +674,9 @@ const ProjectQuotationRow = ({
                     onChange={(e) => setLocalSize(e.target.value)}
                     onBlur={() => handleBlur('optimum_height_size', localSize)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="—"
-                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-medium bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -664,8 +689,9 @@ const ProjectQuotationRow = ({
                     onChange={(e) => setLocalRate(e.target.value)}
                     onBlur={() => handleBlur('rate', localRate)}
                     onKeyDown={handleKeyDown}
+                    disabled={locked}
                     placeholder="0.00"
-                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none tabular-nums text-center placeholder:text-muted-foreground/40"
+                    className="w-full text-sm font-semibold bg-white border border-border shadow-sm hover:border-muted-foreground/30 focus:border-primary/60 focus:ring-1 focus:ring-primary/20 rounded px-1.5 py-1 transition-all h-8 text-foreground focus:outline-none disabled:bg-muted/30 disabled:shadow-none disabled:cursor-not-allowed tabular-nums text-center placeholder:text-muted-foreground/40"
                 />
             </TableCell>
 
@@ -675,6 +701,9 @@ const ProjectQuotationRow = ({
 
             <TableCell className="text-right w-10">
                 <div className="flex items-center justify-end gap-1">
+                    {locked ? (
+                        <Lock className="w-3.5 h-3.5 text-muted-foreground/40" aria-label="Locked" />
+                    ) : (
                     <Button
                         variant="ghost" size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive"
@@ -683,6 +712,7 @@ const ProjectQuotationRow = ({
                     >
                         <Trash2 className="w-3.5 h-3.5" />
                     </Button>
+                    )}
                 </div>
             </TableCell>
         </TableRow>
@@ -710,8 +740,7 @@ export const ProjectDetails = () => {
     const [categoryFilter, setCategoryFilter] = useState('__all__');
     const [sortKey, setSortKey] = useState<SortKey>('common_name');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+    const [isEditProjectOpen, setIsEditProjectOpen] = useState(false);
 
     const [pdfLoading, setPdfLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'standard' | 'boq' | 'quotation'>('standard');
@@ -1013,6 +1042,23 @@ export const ProjectDetails = () => {
                 const rowIdx = i + 3;
                 worksheet.mergeCells(`A${rowIdx}:C${rowIdx}`);
                 const cell = worksheet.getCell(`A${rowIdx}`);
+                cell.value = {
+                    richText: [
+                        { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
+                        { text: row[1], font: { name: 'Arial', size: 10, color: { argb: 'FF1A1A1A' } } }
+                    ]
+                };
+                cell.alignment = { vertical: 'middle', horizontal: 'left' };
+            });
+
+            const architectRows = [
+                ['Landscape Architect:', project.landscape_architect || '—'],
+                ['Architect:', project.architect || '—'],
+            ];
+            architectRows.forEach((row, i) => {
+                const rowIdx = i + 3;
+                worksheet.mergeCells(`D${rowIdx}:G${rowIdx}`);
+                const cell = worksheet.getCell(`D${rowIdx}`);
                 cell.value = {
                     richText: [
                         { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
@@ -1498,6 +1544,43 @@ export const ProjectDetails = () => {
         }
     });
 
+    const updateProjectMutation = useMutation({
+        mutationFn: (data: ProjectCreate) => projectsApi.update(id!, data),
+        onSuccess: (updated) => {
+            queryClient.setQueryData(['project', id], updated);
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
+            showAlert('Project updated', 'success');
+            setIsEditProjectOpen(false);
+        },
+        onError: (e: any) => { showAlert('Failed to update project: ' + (e.response?.data?.detail || e.message), 'error'); },
+    });
+
+    const lockMutation = useMutation({
+        mutationFn: (isLocked: boolean) => projectsApi.setLocked(id!, isLocked),
+        onSuccess: (updated) => {
+            queryClient.setQueryData(['project', id], updated);
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
+            setSelectedPlantIds([]);
+            showAlert(updated.is_locked ? 'Project locked — editing is disabled' : 'Project unlocked', 'success');
+        },
+        onError: (e: any) => { showAlert('Failed to change lock: ' + (e.response?.data?.detail || e.message), 'error'); },
+    });
+
+    const handleToggleLock = () => {
+        if (!project) return;
+        if (project.is_locked) {
+            confirm({
+                title: 'Unlock Project',
+                message: `Unlock "${project.name}"? Plants, quantities and project details can be edited again.`,
+                confirmText: 'Unlock',
+                cancelText: 'Cancel',
+                onConfirm: () => lockMutation.mutate(false),
+            });
+        } else {
+            lockMutation.mutate(true);
+        }
+    };
+
     const handleUpdateBoqFields = useCallback(async (plantId: string, data: any) => {
         try {
             await updateBoqFieldsMutation.mutateAsync({ plantId, ...data });
@@ -1619,7 +1702,6 @@ export const ProjectDetails = () => {
             setSortDir('asc');
             return col;
         });
-        setPage(1);
     }, []);
 
     /* ── Derived data ── */
@@ -1680,9 +1762,6 @@ export const ProjectDetails = () => {
         }, 0);
     }, [project]);
 
-    const totalPages = Math.max(1, Math.ceil(filteredSorted.length / pageSize));
-    const safePage = Math.min(page, totalPages);
-    const pageSlice = filteredSorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
     /* ── Loading states ── */
     if (isLoading) return (
@@ -1699,6 +1778,8 @@ export const ProjectDetails = () => {
         </div>
     );
 
+    const locked = project.is_locked;
+
     return (
         <div className="max-w-5xl mx-auto">
             {/* Back nav */}
@@ -1712,7 +1793,14 @@ export const ProjectDetails = () => {
             <div className="rounded-xl border border-border bg-white shadow-sm p-5 sm:p-6 mb-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0">
-                        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground leading-tight">{project.name}</h1>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground leading-tight">{project.name}</h1>
+                            {locked && (
+                                <Badge variant="secondary" className="gap-1 text-xs">
+                                    <Lock className="w-3 h-3" /> Locked
+                                </Badge>
+                            )}
+                        </div>
                         <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2">
                             {project.client_name && (
                                 <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><User className="w-3.5 h-3.5" /> {project.client_name}</span>
@@ -1726,6 +1814,30 @@ export const ProjectDetails = () => {
                         )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {/* ── Edit project ── */}
+                        <Button
+                            variant="outline" size="sm"
+                            className="h-9"
+                            onClick={() => setIsEditProjectOpen(true)}
+                            disabled={locked}
+                            title={locked ? 'Unlock the project to edit it' : 'Edit project details'}
+                        >
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Edit
+                        </Button>
+
+                        {/* ── Lock / unlock ── */}
+                        <Button
+                            variant={locked ? 'default' : 'outline'} size="sm"
+                            className="h-9"
+                            onClick={handleToggleLock}
+                            disabled={lockMutation.isPending}
+                            title={locked ? 'Unlock to allow editing' : 'Lock to prevent any further edits'}
+                        >
+                            {locked ? <LockOpen className="w-4 h-4 mr-2" /> : <Lock className="w-4 h-4 mr-2" />}
+                            {locked ? 'Unlock' : 'Lock'}
+                        </Button>
+
                         {/* ── Share link group ── */}
                         {shareLinkLoaded && (
                             <div className="flex items-center gap-1.5">
@@ -1785,7 +1897,7 @@ export const ProjectDetails = () => {
             </div>
 
             {/* Plants section */}
-            <div className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
+            <div className="rounded-xl border border-border bg-white shadow-sm overflow-clip">
 
                 {/* Section header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-4 border-b border-border">
@@ -1797,7 +1909,7 @@ export const ProjectDetails = () => {
                             <Badge variant="secondary" className="tabular-nums">{project.plants.length}</Badge>
                         </div>
                         {/* Only show Add button here on mobile */}
-                        <Button size="sm" onClick={openAdd} className="sm:hidden shrink-0">
+                        <Button size="sm" onClick={openAdd} disabled={locked} className="sm:hidden shrink-0">
                             <Plus className="w-4 h-4 mr-1.5" />
                             Add Plant
                         </Button>
@@ -1829,7 +1941,7 @@ export const ProjectDetails = () => {
                             </button>
                         </div>
                         {/* Show Add button here on desktop */}
-                        <Button size="sm" onClick={openAdd} className="hidden sm:flex shrink-0">
+                        <Button size="sm" onClick={openAdd} disabled={locked} className="hidden sm:flex shrink-0">
                             <Plus className="w-4 h-4 mr-2" />
                             Add Plant
                         </Button>
@@ -1840,7 +1952,7 @@ export const ProjectDetails = () => {
                     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                         <Leaf className="w-8 h-8 mb-3 opacity-20" />
                         <p className="text-sm">No plants added yet.</p>
-                        <Button variant="link" size="sm" className="mt-1" onClick={openAdd}>Add the first plant</Button>
+                        {!locked && <Button variant="link" size="sm" className="mt-1" onClick={openAdd}>Add the first plant</Button>}
                     </div>
                 ) : viewMode === 'boq' || viewMode === 'quotation' ? (
                     <>
@@ -1866,6 +1978,18 @@ export const ProjectDetails = () => {
                                             <span className="font-semibold text-foreground mr-1.5">Location:</span>
                                             {project.location || <span className="opacity-40 italic">Not Specified</span>}
                                         </div>
+                                        {viewMode === 'boq' && (
+                                            <>
+                                                <div>
+                                                    <span className="font-semibold text-foreground mr-1.5">Landscape Architect:</span>
+                                                    {project.landscape_architect || <span className="opacity-40 italic">Not Specified</span>}
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-foreground mr-1.5">Architect:</span>
+                                                    {project.architect || <span className="opacity-40 italic">Not Specified</span>}
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 
@@ -1911,15 +2035,18 @@ export const ProjectDetails = () => {
                         </div>
 
                         {/* Bulk Edit Toolbar */}
-                        {selectedPlantIds.length > 0 && (
-                            <div className="mx-5 my-3 p-4 bg-primary/5 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-end justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                        {selectedPlantIds.length > 0 && !locked && (
+                            <div className="sticky top-2 z-30 mx-3 sm:mx-5 my-3 p-3 sm:p-4 bg-[#f5f7f4] border border-primary/25 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <div className="space-y-1">
-                                    <h4 className="text-sm font-semibold text-primary">Bulk Edit Selected</h4>
-                                    <p className="text-xs text-muted-foreground">
+                                    <h4 className="text-sm font-semibold text-primary">
+                                        Bulk Edit Selected
+                                        <span className="ml-1.5 text-xs font-medium text-foreground tabular-nums">({selectedPlantIds.length})</span>
+                                    </h4>
+                                    <p className="hidden sm:block text-xs text-muted-foreground">
                                         Modifying <span className="font-semibold text-foreground">{selectedPlantIds.length}</span> plants. Leave fields blank to keep their current values.
                                     </p>
                                 </div>
-                                <div className={`grid ${viewMode === 'quotation' ? 'grid-cols-4' : 'grid-cols-3'} gap-3 flex-1 max-w-xl`}>
+                                <div className={`grid grid-cols-2 ${viewMode === 'quotation' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2 sm:gap-3 flex-1 max-w-xl`}>
                                     <div className="space-y-1">
                                         <Label htmlFor="bulk-unit" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Unit</Label>
                                         <Input
@@ -2021,12 +2148,13 @@ export const ProjectDetails = () => {
                                             <input
                                                 type="checkbox"
                                                 checked={filteredSorted.length > 0 && selectedPlantIds.length === filteredSorted.length}
+                                                disabled={locked}
                                                 onChange={(e) => handleSelectAllChange(e.target.checked, filteredSorted)}
                                                 className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:outline-none accent-primary"
                                             />
                                         </TableHead>
-                                        <TableHead className="w-14 text-center font-semibold">Image</TableHead>
-                                        <TableHead className="font-semibold w-36 max-w-[144px] truncate">Common Name</TableHead>
+                                        <TableHead className={`${STICKY_IMG} ${STICKY_HEAD_BG} text-center font-semibold`}>Image</TableHead>
+                                        <TableHead className={`${STICKY_NAME} ${STICKY_HEAD_BG} px-3 font-semibold truncate`}>Common Name</TableHead>
                                         <TableHead className="font-semibold w-40 max-w-[160px] truncate">Scientific Name</TableHead>
                                         <TableHead className="font-semibold text-center w-20 min-w-[70px]">Quantity</TableHead>
                                         <TableHead className="font-semibold text-center w-20 min-w-[70px]">Unit</TableHead>
@@ -2053,7 +2181,7 @@ export const ProjectDetails = () => {
                                                 {/* Group Header Row */}
                                                 <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
                                                     <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
-                                                        {category} ({pps.length})
+                                                        <span className="sticky left-5">{category} ({pps.length})</span>
                                                     </TableCell>
                                                 </TableRow>
                                                 {pps.map((pp, idx) => {
@@ -2066,6 +2194,7 @@ export const ProjectDetails = () => {
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
+                                                                locked={locked}
                                                                 onSelectChange={handleSelectChange}
                                                             />
                                                         );
@@ -2078,6 +2207,7 @@ export const ProjectDetails = () => {
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
+                                                                locked={locked}
                                                                 onSelectChange={handleSelectChange}
                                                             />
                                                         );
@@ -2115,7 +2245,7 @@ export const ProjectDetails = () => {
                                 <Input
                                     placeholder="Search plants, notes…"
                                     value={search}
-                                    onChange={e => { setSearch(e.target.value); setPage(1); }}
+                                    onChange={e => setSearch(e.target.value)}
                                     className="pl-8 h-8 text-sm bg-background w-full"
                                 />
                             </div>
@@ -2123,7 +2253,7 @@ export const ProjectDetails = () => {
                             {/* Filters Group */}
                             <div className="flex items-center gap-2">
                                 {/* Category filter */}
-                                <Select value={categoryFilter} onValueChange={v => { setCategoryFilter(v); setPage(1); }}>
+                                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                                     <SelectTrigger className="w-[125px] sm:w-[150px] h-8 text-sm bg-background">
                                         <SelectValue placeholder="All categories" />
                                     </SelectTrigger>
@@ -2135,17 +2265,6 @@ export const ProjectDetails = () => {
                                     </SelectContent>
                                 </Select>
 
-                                {/* Page size */}
-                                <Select value={String(pageSize)} onValueChange={v => { setPageSize(Number(v)); setPage(1); }}>
-                                    <SelectTrigger className="w-[75px] sm:w-[90px] h-8 text-sm bg-background">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PAGE_SIZE_OPTIONS.map(n => (
-                                            <SelectItem key={n} value={String(n)}>{n} / pg</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
                             </div>
                         </div>
 
@@ -2164,20 +2283,19 @@ export const ProjectDetails = () => {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {pageSlice.length === 0 ? (
+                                    {filteredSorted.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={7} className="h-24 text-center text-sm text-muted-foreground">
                                                 No plants match your search.
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        pageSlice.map((pp, idx) => (
+                                        filteredSorted.map((pp, idx) => (
                                             <ProjectPlantRowMemo
                                                 key={pp.plant_id}
                                                 pp={pp}
                                                 idx={idx}
-                                                safePage={safePage}
-                                                pageSize={pageSize}
+                                                locked={locked}
                                                 onEdit={openEdit}
                                                 onDelete={handleDeletePlant}
                                             />
@@ -2187,53 +2305,11 @@ export const ProjectDetails = () => {
                             </Table>
                         </div>
 
-                        {/* ── Pagination ── */}
-                        <div className="flex flex-col gap-2 px-5 py-3 border-t border-border bg-muted/10 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="text-xs text-muted-foreground order-2 sm:order-1">
-                                {filteredSorted.length === 0
-                                    ? 'No results'
-                                    : `Showing ${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredSorted.length)} of ${filteredSorted.length} plants`}
+                        {(search || categoryFilter !== '__all__') && (
+                            <p className="px-5 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
+                                Showing {filteredSorted.length} of {project.plants.length} plants
                             </p>
-                            <div className="flex items-center gap-1.5 order-1 sm:order-2">
-                                <Button
-                                    variant="outline" size="icon"
-                                    className="h-7 w-7"
-                                    disabled={safePage <= 1}
-                                    onClick={() => setPage(1)}
-                                    title="First page"
-                                >
-                                    <ChevronLeft className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                    variant="outline" size="sm"
-                                    className="h-7 px-2 text-xs"
-                                    disabled={safePage <= 1}
-                                    onClick={() => setPage(p => p - 1)}
-                                >
-                                    <ChevronLeft className="w-3 h-3 mr-1" /> Prev
-                                </Button>
-                                <span className="text-xs text-muted-foreground px-1 tabular-nums">
-                                    {safePage} / {totalPages}
-                                </span>
-                                <Button
-                                    variant="outline" size="sm"
-                                    className="h-7 px-2 text-xs"
-                                    disabled={safePage >= totalPages}
-                                    onClick={() => setPage(p => p + 1)}
-                                >
-                                    Next <ChevronRight className="w-3 h-3 ml-1" />
-                                </Button>
-                                <Button
-                                    variant="outline" size="icon"
-                                    className="h-7 w-7"
-                                    disabled={safePage >= totalPages}
-                                    onClick={() => setPage(totalPages)}
-                                    title="Last page"
-                                >
-                                    <ChevronRight className="w-3 h-3" />
-                                </Button>
-                            </div>
-                        </div>
+                        )}
                     </>
                 )}
             </div>
@@ -2324,6 +2400,15 @@ export const ProjectDetails = () => {
                     </form>
                 </DialogContent>
             </Dialog>
+
+            {/* ── Edit Project Dialog ── */}
+            <ProjectFormDialog
+                open={isEditProjectOpen}
+                project={project}
+                isSaving={updateProjectMutation.isPending}
+                onClose={() => setIsEditProjectOpen(false)}
+                onSubmit={(data) => updateProjectMutation.mutate(data)}
+            />
 
         </div>
     );

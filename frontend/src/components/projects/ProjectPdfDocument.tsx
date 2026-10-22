@@ -123,6 +123,8 @@ const s = StyleSheet.create({
         fontFamily: 'Helvetica',
         color: C.dark,
     },
+    coverHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 },
+    coverLogo: { width: 110, height: 110, marginRight: -15, marginTop: -20, marginBottom: -20 },
     coverTitle: { fontSize: 32, fontFamily: 'Helvetica-Bold', color: C.dark, marginBottom: 8, letterSpacing: -0.8 },
     coverMeta: { flexDirection: 'row', gap: 24, marginBottom: 6 },
     coverMetaText: { fontSize: 11, color: C.mutedFg },
@@ -193,22 +195,28 @@ function CoverPage({ project, imgCache }: CoverProps) {
 
     return (
         <Page size="A4" style={s.page} wrap>
-            <Text style={s.coverTitle}>{project.name}</Text>
-            <View style={s.coverMeta}>
-                {project.client_name && (
-                    <Text style={s.coverMetaText}>
-                        <Text style={s.coverMetaBold}>Client: </Text>{project.client_name}
-                    </Text>
-                )}
-                {project.location && (
-                    <Text style={s.coverMetaText}>
-                        <Text style={s.coverMetaBold}>Location: </Text>{project.location}
-                    </Text>
-                )}
+            <View style={s.coverHeader}>
+                <View style={{ flex: 1 }}>
+                    <Text style={s.coverTitle}>{project.name}</Text>
+                    <View style={s.coverMeta}>
+                        {project.client_name && (
+                            <Text style={s.coverMetaText}>
+                                <Text style={s.coverMetaBold}>Client: </Text>{project.client_name}
+                            </Text>
+                        )}
+                        {project.location && (
+                            <Text style={s.coverMetaText}>
+                                <Text style={s.coverMetaBold}>Location: </Text>{project.location}
+                            </Text>
+                        )}
+                    </View>
+                    {project.description && (
+                        <Text style={s.coverDesc}>{project.description}</Text>
+                    )}
+                </View>
+                {/* Landschaft Logo */}
+                <Image src={window.location.origin + '/logo-color.png'} style={s.coverLogo} />
             </View>
-            {project.description && (
-                <Text style={s.coverDesc}>{project.description}</Text>
-            )}
             <View style={s.divider} />
             <Text style={s.sectionTitle}>Project Inventory</Text>
 

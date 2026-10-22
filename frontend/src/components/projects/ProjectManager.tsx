@@ -4,7 +4,7 @@ import { Link } from '@tanstack/react-router';
 import {
     Plus, Search, Pencil, Trash2, Copy, MoreVertical,
     LayoutGrid, List, FolderKanban, MapPin, User, CalendarDays, Leaf,
-    ChevronRight,
+    ChevronRight, Lock,
 } from 'lucide-react';
 
 import { projectsApi } from '../../api/projects';
@@ -12,20 +12,12 @@ import { projectsQueryOptions } from '../../api/queryOptions';
 import type { ProjectCreate, Project } from '../../types/project';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { ProjectFormDialog } from './ProjectFormDialog';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogFooter,
-} from '@/components/ui/dialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -80,7 +72,10 @@ const ActionsMenu = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectIte
             </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
-            <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(project); }}>
+            <DropdownMenuItem
+                disabled={project.is_locked}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(project); }}
+            >
                 <Pencil className="w-4 h-4 mr-2" /> Edit
             </DropdownMenuItem>
             <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDuplicate(project.id); }}>
@@ -89,10 +84,14 @@ const ActionsMenu = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectIte
             <DropdownMenuSeparator />
             <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
+                disabled={project.is_locked}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(project.id, project.name); }}
             >
                 <Trash2 className="w-4 h-4 mr-2" /> Delete
             </DropdownMenuItem>
+            {project.is_locked && (
+                <p className="px-2 py-1.5 text-[11px] text-muted-foreground">Unlock the project to edit or delete it.</p>
+            )}
         </DropdownMenuContent>
     </DropdownMenu>
 ));
@@ -110,6 +109,7 @@ const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Projec
             <div className="relative z-10 flex flex-col h-full pointer-events-none">
                 <div className="flex items-start justify-between p-5 pb-3">
                     <h3 className="font-semibold text-foreground text-base leading-snug group-hover:text-primary transition-colors pr-2 text-balance">
+                        {project.is_locked && <Lock className="inline w-3.5 h-3.5 mr-1.5 -mt-0.5 text-muted-foreground" aria-label="Locked" />}
                         {project.name}
                     </h3>
                     <div className="shrink-0 pointer-events-auto">
@@ -158,6 +158,7 @@ const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Pr
                     to={`/projects/${project.id}` as any}
                     className="font-medium text-foreground hover:text-primary flex items-center gap-1 transition-colors"
                 >
+                    {project.is_locked && <Lock className="w-3.5 h-3.5 shrink-0 text-muted-foreground" aria-label="Locked" />}
                     {project.name}
                     <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Link>
@@ -206,12 +207,6 @@ export const ProjectManager = () => {
 
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [editingProject, setEditingProject] = useState<Project | null>(null);
-
-    // Form state
-    const [name, setName] = useState('');
-    const [clientName, setClientName] = useState('');
-    const [location, setLocation] = useState('');
-    const [description, setDescription] = useState('');
 
     const projectsParams = useMemo(() => ({
         skip: (currentPage - 1) * PAGE_SIZE,
@@ -293,23 +288,17 @@ export const ProjectManager = () => {
 
     const openCreate = useCallback(() => {
         setEditingProject(null);
-        setName(''); setClientName(''); setLocation(''); setDescription('');
         setIsDialogOpen(true);
     }, []);
 
     const openEdit = useCallback((project: Project) => {
         setEditingProject(project);
-        setName(project.name);
-        setClientName(project.client_name || '');
-        setLocation(project.location || '');
-        setDescription(project.description || '');
         setIsDialogOpen(true);
     }, []);
 
     const closeDialog = useCallback(() => {
         setIsDialogOpen(false);
         setEditingProject(null);
-        setName(''); setClientName(''); setLocation(''); setDescription('');
     }, []);
 
     const handleDelete = useCallback((id: string, projectName: string) => {
@@ -322,13 +311,11 @@ export const ProjectManager = () => {
         });
     }, [confirm, deleteMutation]);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        const data = { name, client_name: clientName, location, description };
+    const handleSubmit = (data: ProjectCreate) => {
         if (editingProject) {
             updateMutation.mutate({ id: editingProject.id, data });
         } else {
-            createMutation.mutate(data as ProjectCreate);
+            createMutation.mutate(data);
         }
     };
 
@@ -496,65 +483,13 @@ export const ProjectManager = () => {
             )}
 
             {/* Create / Edit Dialog */}
-            <Dialog open={isDialogOpen} onOpenChange={(o) => !o && closeDialog()}>
-                <DialogContent className="sm:max-w-lg">
-                    <DialogHeader>
-                        <DialogTitle>{editingProject ? 'Edit Project' : 'New Project'}</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-                        <div className="space-y-1.5">
-                            <Label htmlFor="proj-name">Project Name <span className="text-destructive">*</span></Label>
-                            <Input
-                                id="proj-name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                placeholder="e.g. Riverside Park Redesign"
-                                required
-                                autoFocus
-                            />
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <Label htmlFor="proj-client">Client</Label>
-                                <Input
-                                    id="proj-client"
-                                    value={clientName}
-                                    onChange={(e) => setClientName(e.target.value)}
-                                    placeholder="Client name"
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label htmlFor="proj-location">Location</Label>
-                                <Input
-                                    id="proj-location"
-                                    value={location}
-                                    onChange={(e) => setLocation(e.target.value)}
-                                    placeholder="City or site"
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="proj-desc">Description</Label>
-                            <Textarea
-                                id="proj-desc"
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Brief project overview…"
-                                rows={3}
-                                className="resize-none"
-                            />
-                        </div>
-                        <DialogFooter className="gap-2 sm:gap-0">
-                            <Button type="button" variant="outline" onClick={closeDialog} disabled={isSaving}>
-                                Cancel
-                            </Button>
-                            <Button type="submit" disabled={isSaving || !name.trim()}>
-                                {isSaving ? 'Saving…' : editingProject ? 'Save Changes' : 'Create Project'}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
+            <ProjectFormDialog
+                open={isDialogOpen}
+                project={editingProject}
+                isSaving={isSaving}
+                onClose={closeDialog}
+                onSubmit={handleSubmit}
+            />
         </div>
     );
 };
