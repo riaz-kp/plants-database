@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect, memo, useCallback, Fragment } from 'react';
+import { useState, useMemo, useEffect, memo, useCallback, useRef, Fragment } from 'react';
 import { useParams, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft, Download, Plus, Pencil, Trash2, Leaf,
     User, MapPin, ExternalLink, Search, ChevronUp, ChevronDown,
-    ChevronsUpDown, Lock, LockOpen,
+    ChevronsUpDown, Lock, LockOpen, LayoutGrid, LayoutList,
     Link2, Copy, Check, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
@@ -15,10 +15,13 @@ import { projectsApi } from '../../api/projects';
 import type { ShareLinkInfo } from '../../api/projects';
 import { plantsApi } from '../../api/plants';
 import { taxonomyApi } from '../../api/taxonomy';
-import type { ProjectPlantCreate, ProjectCreate } from '../../types/project';
+import type { ProjectPlantCreate, ProjectCreate, Project } from '../../types/project';
+import type { Plant } from '../../types/plant';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { ProjectFormDialog } from './ProjectFormDialog';
+import { useFloatingTableHeader } from '../../hooks/use-floating-table-header';
+import { cn } from '../../lib-frontend/utils';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -210,6 +213,198 @@ const ProjectPlantRowMemo = memo(({ pp, idx, locked, onEdit, onDelete }: Project
         </TableRow>
     );
 });
+
+/* ─── Card (standard view, card layout) ─── */
+const ProjectPlantCardMemo = memo(({ pp, idx, locked, onEdit, onDelete }: ProjectPlantRowProps) => {
+    const plant = pp.plant;
+    const image = plant?.image_url || plant?.icon_url;
+    return (
+        <div className="group flex flex-col rounded-xl border border-border bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+            <Link
+                to="/plants/$id"
+                params={{ id: pp.plant_id }}
+                className="relative block aspect-[4/3] bg-muted overflow-hidden"
+                aria-label={`Open ${plant?.common_name ?? 'plant'}`}
+            >
+                {image ? (
+                    <img src={image} alt="" loading="lazy" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                        <Leaf size={28} className="text-muted-foreground/30" />
+                    </div>
+                )}
+                <span className="absolute top-2 left-2 min-w-6 h-6 px-1.5 rounded-full bg-black/45 text-white text-[11px] font-semibold tabular-nums flex items-center justify-center backdrop-blur-sm">
+                    {idx + 1}
+                </span>
+            </Link>
+            <div className="flex flex-col gap-1.5 p-3 flex-1">
+                <div className="min-w-0">
+                    <Link
+                        to="/plants/$id"
+                        params={{ id: pp.plant_id }}
+                        className="block font-semibold text-sm text-foreground hover:text-primary leading-tight truncate"
+                    >
+                        {plant?.common_name}
+                    </Link>
+                    <p className="text-xs italic text-muted-foreground truncate mt-0.5">
+                        {plant?.scientific_name || plant?.taxon?.name || 'Unknown species'}
+                    </p>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                    {plant?.category && <Badge variant="outline" className="text-[10px] h-5 px-1.5">{plant.category}</Badge>}
+                    {plant?.planting_place && <Badge variant="secondary" className="text-[10px] h-5 px-1.5">{plant.planting_place}</Badge>}
+                </div>
+                {pp.notes && <p className="text-xs text-muted-foreground line-clamp-2">{pp.notes}</p>}
+                <div className="mt-auto pt-2 flex items-center justify-end gap-1 border-t border-border/60">
+                    {locked ? (
+                        <Lock className="w-3.5 h-3.5 my-1.5 text-muted-foreground/40" aria-label="Locked" />
+                    ) : (
+                        <>
+                            <Button
+                                variant="ghost" size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                onClick={() => onEdit(pp.plant_id, pp.notes || '')}
+                                title="Edit notes"
+                            >
+                                <Pencil className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                                variant="ghost" size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => onDelete(pp.plant_id, plant?.common_name || 'Plant')}
+                                title="Remove plant"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+});
+
+/* ─── Searchable plant picker (add-plant dialog) ─── */
+const PICKER_LIMIT = 60;
+
+function PlantPicker({ plants, value, onChange, addedIds }: {
+    plants: Plant[];
+    value: string;
+    onChange: (plantId: string) => void;
+    addedIds: Set<string>;
+}) {
+    const [query, setQuery] = useState('');
+
+    // Names starting with the query first, then names containing it
+    const matches = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return plants
+            .map(plant => {
+                const names = [plant.common_name, plant.scientific_name, plant.taxon?.name]
+                    .filter(Boolean)
+                    .map(n => n!.toLowerCase());
+                const rank = !q ? 1 : names.some(n => n.startsWith(q)) ? 0 : names.some(n => n.includes(q)) ? 1 : -1;
+                return { plant, rank };
+            })
+            .filter(m => m.rank >= 0)
+            .sort((a, b) => a.rank - b.rank || a.plant.common_name.localeCompare(b.plant.common_name))
+            .map(m => m.plant);
+    }, [plants, query]);
+
+    const selected = plants.find(plant => plant.id === value);
+
+    return (
+        <div className="space-y-2">
+            <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                    id="pp-plant"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                        // Enter picks the best match instead of submitting the form
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        const first = matches.find(plant => !addedIds.has(plant.id));
+                        if (first) onChange(first.id);
+                    }}
+                    placeholder="Type a common or scientific name…"
+                    autoComplete="off"
+                    autoFocus
+                    className="pl-8"
+                />
+            </div>
+            <div role="listbox" aria-label="Plants" className="max-h-56 overflow-y-auto rounded-md border border-border divide-y divide-border/60">
+                {matches.length === 0 ? (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">No plants match “{query}”.</p>
+                ) : matches.slice(0, PICKER_LIMIT).map(plant => {
+                    const added = addedIds.has(plant.id);
+                    const active = plant.id === value;
+                    return (
+                        <button
+                            key={plant.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            disabled={added}
+                            onClick={() => onChange(plant.id)}
+                            className={cn(
+                                'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
+                                active ? 'bg-primary/10' : 'hover:bg-muted/50',
+                                added && 'opacity-50 cursor-not-allowed hover:bg-transparent'
+                            )}
+                        >
+                            {plant.icon_url ? (
+                                <img src={plant.icon_url} alt="" className="w-8 h-8 rounded-md object-cover shrink-0" />
+                            ) : (
+                                <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                                    <Leaf size={13} className="text-muted-foreground/50" />
+                                </span>
+                            )}
+                            <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-foreground truncate">{plant.common_name}</span>
+                                <span className="block text-xs italic text-muted-foreground truncate">
+                                    {plant.scientific_name || plant.taxon?.name || '—'}
+                                </span>
+                            </span>
+                            {added ? (
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Added</span>
+                            ) : active ? (
+                                <Check className="w-4 h-4 text-primary shrink-0" />
+                            ) : null}
+                        </button>
+                    );
+                })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+                {matches.length > PICKER_LIMIT
+                    ? `Showing ${PICKER_LIMIT} of ${matches.length} — keep typing to narrow down.`
+                    : `${matches.length} plant(s)`}
+                {selected && <> · Selected: <span className="font-semibold text-foreground">{selected.common_name}</span></>}
+            </p>
+        </div>
+    );
+}
+
+/** BOQ and quotation sheets list the architects beside the project details (rows 3–4). */
+const addArchitectRows = (worksheet: ExcelJS.Worksheet, project: Project) => {
+    const rows = [
+        ['Landscape Architect:', project.landscape_architect || '—'],
+        ['Architect:', project.architect || '—'],
+    ];
+    rows.forEach((row, i) => {
+        const rowIdx = i + 3;
+        worksheet.mergeCells(`D${rowIdx}:G${rowIdx}`);
+        const cell = worksheet.getCell(`D${rowIdx}`);
+        cell.value = {
+            richText: [
+                { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
+                { text: row[1], font: { name: 'Arial', size: 10, color: { argb: 'FF1A1A1A' } } }
+            ]
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    });
+};
 
 const ProjectBoqRow = ({
     pp,
@@ -741,6 +936,15 @@ export const ProjectDetails = () => {
     const [sortKey, setSortKey] = useState<SortKey>('common_name');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     const [isEditProjectOpen, setIsEditProjectOpen] = useState(false);
+    const [standardLayout, setStandardLayout] = useState<'list' | 'cards'>(() => {
+        try { return localStorage.getItem('projectPlantsLayout') === 'cards' ? 'cards' : 'list'; } catch { return 'list'; }
+    });
+    const changeStandardLayout = (layout: 'list' | 'cards') => {
+        setStandardLayout(layout);
+        try { localStorage.setItem('projectPlantsLayout', layout); } catch { /* storage unavailable */ }
+    };
+    const boqTableRef = useRef<HTMLTableElement>(null);
+    const bulkBarRef = useRef<HTMLDivElement>(null);
 
     const [pdfLoading, setPdfLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'standard' | 'boq' | 'quotation'>('standard');
@@ -1051,22 +1255,7 @@ export const ProjectDetails = () => {
                 cell.alignment = { vertical: 'middle', horizontal: 'left' };
             });
 
-            const architectRows = [
-                ['Landscape Architect:', project.landscape_architect || '—'],
-                ['Architect:', project.architect || '—'],
-            ];
-            architectRows.forEach((row, i) => {
-                const rowIdx = i + 3;
-                worksheet.mergeCells(`D${rowIdx}:G${rowIdx}`);
-                const cell = worksheet.getCell(`D${rowIdx}`);
-                cell.value = {
-                    richText: [
-                        { text: row[0] + ' ', font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF666666' } } },
-                        { text: row[1], font: { name: 'Arial', size: 10, color: { argb: 'FF1A1A1A' } } }
-                    ]
-                };
-                cell.alignment = { vertical: 'middle', horizontal: 'left' };
-            });
+            addArchitectRows(worksheet, project);
 
             // 3. Add Table Headers (Row 8)
             const headerRow = worksheet.getRow(8);
@@ -1313,6 +1502,8 @@ export const ProjectDetails = () => {
                 };
                 cell.alignment = { vertical: 'middle', horizontal: 'left' };
             });
+
+            addArchitectRows(worksheet, project);
 
             // 3. Add Table Headers (Row 8)
             const headerRow = worksheet.getRow(8);
@@ -1763,6 +1954,17 @@ export const ProjectDetails = () => {
     }, [project]);
 
 
+    // BOQ / quotation column headers float under the page top (or the bulk edit bar)
+    const getHeaderTop = useCallback(() => {
+        const main = boqTableRef.current?.closest('main');
+        let top = main ? main.getBoundingClientRect().top : 0;
+        if (bulkBarRef.current) top = Math.max(top, bulkBarRef.current.getBoundingClientRect().bottom + 6);
+        return top;
+    }, []);
+    useFloatingTableHeader(boqTableRef, getHeaderTop, [viewMode, filteredSorted.length, selectedPlantIds.length > 0, isLoading]);
+
+    const projectPlantIds = useMemo(() => new Set(project?.plants.map(pp => pp.plant_id) ?? []), [project]);
+
     /* ── Loading states ── */
     if (isLoading) return (
         <div className="space-y-6">
@@ -1813,6 +2015,7 @@ export const ProjectDetails = () => {
                             <p className="text-sm text-muted-foreground leading-relaxed mt-3">{project.description}</p>
                         )}
                     </div>
+                    {viewMode === 'standard' && (
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                         {/* ── Edit project ── */}
                         <Button
@@ -1893,6 +2096,7 @@ export const ProjectDetails = () => {
                             {pdfLoading ? 'Generating PDF…' : 'Download PDF'}
                         </Button>
                     </div>
+                    )}
                 </div>
             </div>
 
@@ -2034,19 +2238,19 @@ export const ProjectDetails = () => {
                             </div>
                         </div>
 
-                        {/* Bulk Edit Toolbar */}
+                        {/* Bulk Edit Toolbar — phones: title + buttons on top, inputs below; wider: title, then inputs + buttons */}
                         {selectedPlantIds.length > 0 && !locked && (
-                            <div className="sticky top-2 z-30 mx-3 sm:mx-5 my-3 p-3 sm:p-4 bg-[#f5f7f4] border border-primary/25 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <div className="space-y-1">
+                            <div ref={bulkBarRef} className="sticky top-2 z-30 mx-3 sm:mx-5 my-3 p-3 sm:p-4 bg-[#f5f7f4] border border-primary/25 rounded-xl shadow-lg grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="col-start-1 row-start-1 min-w-0 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                                     <h4 className="text-sm font-semibold text-primary">
                                         Bulk Edit Selected
                                         <span className="ml-1.5 text-xs font-medium text-foreground tabular-nums">({selectedPlantIds.length})</span>
                                     </h4>
                                     <p className="hidden sm:block text-xs text-muted-foreground">
-                                        Modifying <span className="font-semibold text-foreground">{selectedPlantIds.length}</span> plants. Leave fields blank to keep their current values.
+                                        Leave a field blank to keep its current value.
                                     </p>
                                 </div>
-                                <div className={`grid grid-cols-2 ${viewMode === 'quotation' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2 sm:gap-3 flex-1 max-w-xl`}>
+                                <div className={`col-span-2 row-start-2 sm:col-span-1 sm:col-start-1 grid ${viewMode === 'quotation' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2 sm:gap-3`}>
                                     <div className="space-y-1">
                                         <Label htmlFor="bulk-unit" className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Unit</Label>
                                         <Input
@@ -2094,7 +2298,7 @@ export const ProjectDetails = () => {
                                         </div>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
+                                <div className="col-start-2 row-start-1 sm:row-start-2 sm:self-end flex items-center gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -2140,8 +2344,8 @@ export const ProjectDetails = () => {
 
                         {/* BOQ / Quotation Table View */}
                         <div className="overflow-x-auto">
-                            <Table>
-                                <TableHeader>
+                            <Table ref={boqTableRef}>
+                                <TableHeader className="relative z-20 [&_th]:bg-[#f7f5f1] [&[data-floating]_th]:shadow-[0_6px_6px_-6px_rgba(0,0,0,0.3)]">
                                     <TableRow className="bg-muted/30">
                                         <TableHead className="w-8 font-semibold text-center">#</TableHead>
                                         <TableHead className="w-10 text-center">
@@ -2265,10 +2469,51 @@ export const ProjectDetails = () => {
                                     </SelectContent>
                                 </Select>
 
+                                {/* List / card layout */}
+                                <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-background">
+                                    <Button
+                                        variant={standardLayout === 'list' ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => changeStandardLayout('list')}
+                                        aria-pressed={standardLayout === 'list'}
+                                        title="List view"
+                                    >
+                                        <LayoutList className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Button
+                                        variant={standardLayout === 'cards' ? 'secondary' : 'ghost'}
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => changeStandardLayout('cards')}
+                                        aria-pressed={standardLayout === 'cards'}
+                                        title="Card view"
+                                    >
+                                        <LayoutGrid className="w-3.5 h-3.5" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
 
-                        {/* ── Table ── */}
+                        {standardLayout === 'cards' ? (
+                            filteredSorted.length === 0 ? (
+                                <p className="h-24 flex items-center justify-center text-sm text-muted-foreground">No plants match your search.</p>
+                            ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-3 sm:p-4">
+                                    {filteredSorted.map((pp, idx) => (
+                                        <ProjectPlantCardMemo
+                                            key={pp.plant_id}
+                                            pp={pp}
+                                            idx={idx}
+                                            locked={locked}
+                                            onEdit={openEdit}
+                                            onDelete={handleDeletePlant}
+                                        />
+                                    ))}
+                                </div>
+                            )
+                        ) : (
+                        /* ── Table ── */
                         <div className="overflow-x-auto">
                             <Table>
                                 <TableHeader>
@@ -2304,6 +2549,7 @@ export const ProjectDetails = () => {
                                 </TableBody>
                             </Table>
                         </div>
+                        )}
 
                         {(search || categoryFilter !== '__all__') && (
                             <p className="px-5 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
@@ -2323,18 +2569,19 @@ export const ProjectDetails = () => {
                     <form onSubmit={handleSubmit} className="space-y-4 pt-2">
                         <div className="space-y-1.5">
                             <Label htmlFor="pp-plant">Plant <span className="text-destructive">*</span></Label>
-                            <Select value={selectedPlantId} onValueChange={setSelectedPlantId} disabled={!!editingPlantId} required>
-                                <SelectTrigger id="pp-plant">
-                                    <SelectValue placeholder="Select a plant…" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-60">
-                                    {allPlants.map((p) => (
-                                        <SelectItem key={p.id} value={p.id}>
-                                            {p.common_name}{p.taxon?.name ? ` (${p.taxon.name})` : ''}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            {editingPlantId ? (
+                                <p className="h-9 px-3 flex items-center rounded-md border border-input bg-muted/40 text-sm text-foreground">
+                                    {allPlants.find(p => p.id === selectedPlantId)?.common_name
+                                        ?? project.plants.find(pp => pp.plant_id === selectedPlantId)?.plant?.common_name}
+                                </p>
+                            ) : (
+                                <PlantPicker
+                                    plants={allPlants}
+                                    value={selectedPlantId}
+                                    onChange={setSelectedPlantId}
+                                    addedIds={projectPlantIds}
+                                />
+                            )}
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">

@@ -182,20 +182,10 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
                 </div>
 
                 <div
-                    className="absolute top-2 right-2 z-10 actions-menu-container flex items-center gap-1.5"
+                    className="absolute top-2 right-2 z-10 actions-menu-container"
                     role="presentation"
                     onClick={e => e.stopPropagation()}
                 >
-                    <Button
-                        variant="secondary"
-                        size="icon"
-                        title="Add to project"
-                        aria-label={`Add ${plant.common_name} to project`}
-                        onClick={() => onAddToProject(plant.id)}
-                        className="h-8 w-8 rounded-full bg-black/20 hover:bg-black/40 border-0 text-white backdrop-blur-md shadow-sm"
-                    >
-                        <FolderPlus size={15} />
-                    </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button
@@ -207,7 +197,11 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
                                 <MoreVertical size={16} />
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
+                                <FolderPlus className="mr-2 h-4 w-4" />
+                                <span>Add to Project</span>
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onEdit(plant)}>
                                 <Pencil className="mr-2 h-4 w-4" />
                                 <span>Edit</span>
@@ -338,16 +332,6 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
                 <Button
                     variant="ghost"
                     size="icon"
-                    title="Add to project"
-                    aria-label={`Add ${plant.common_name} to project`}
-                    onClick={() => onAddToProject(plant.id)}
-                    className="h-8 w-8 text-muted-foreground hover:text-primary"
-                >
-                    <FolderPlus size={15} />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
                     title="View details"
                     aria-label={`View ${plant.common_name} details`}
                     onClick={() => onOpen(plant.id)}
@@ -366,7 +350,11 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
                             <MoreVertical size={14} />
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => onAddToProject(plant.id)}>
+                            <FolderPlus className="mr-2 h-4 w-4" />
+                            <span>Add to Project</span>
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => onEdit(plant)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             <span>Edit</span>
