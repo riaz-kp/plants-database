@@ -3,7 +3,7 @@
  *
  * BOQ and quotation workbooks for a project: branded header with the project
  * details, category-grouped plant table with thumbnails, live formulas for
- * amounts/totals, frozen headers and an A4 print setup.
+ * amounts/totals and an A4 print setup.
  */
 
 import ExcelJS from 'exceljs';
@@ -126,7 +126,7 @@ async function buildWorkbook(project: Project, dateStr: string, spec: SheetSpec)
     wb.creator = 'Landschaft';
     wb.title = `${project.name} — ${spec.title}`;
     const ws = wb.addWorksheet(spec.sheetName, {
-        views: [{ state: 'frozen', ySplit: HEADER_ROW, xSplit: 3, showGridLines: false }],
+        views: [{ showGridLines: false }],
         pageSetup: {
             paperSize: 9, // A4
             orientation: 'portrait',
