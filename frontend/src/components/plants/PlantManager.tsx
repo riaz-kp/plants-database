@@ -59,6 +59,8 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
@@ -73,7 +75,6 @@ import {
     Loader2,
     MoreVertical,
     Leaf,
-    FolderOpen,
     Pencil,
     Trash2,
     ArrowLeft,
@@ -87,7 +88,8 @@ import {
     ArrowUpAZ,
     History,
     AlertTriangle,
-    Eye,
+    ArrowUpRight,
+    ChevronDown,
     FolderPlus,
     Lock,
 } from 'lucide-react';
@@ -250,7 +252,7 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
                         onClick={() => onOpen(plant.id)}
                         className="h-7 px-2.5 text-xs gap-1 shrink-0"
                     >
-                        <Eye size={13} /> Details
+                        Details <ArrowUpRight size={13} />
                     </Button>
                 </div>
             </CardContent>
@@ -351,7 +353,7 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
                     onClick={() => onOpen(plant.id)}
                     className="h-8 w-8 text-muted-foreground hover:text-primary"
                 >
-                    <Eye size={15} />
+                    <ArrowUpRight size={16} />
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -513,11 +515,13 @@ export const PlantManager = () => {
     const { data: categoriesOptions } = useQuery(categoriesQueryOptions());
 
 
-    // Pre-select the project plants were last added to, else the most recently updated one
+    // Default target: the project plants were last added to, else the most recently updated one
     const projectOptions = projectsData?.items ?? [];
-    const lastProjectId = (() => {
+    const [lastProjectId, setLastProjectId] = useState<string | null>(() => {
         try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
-    })();
+    });
+    const defaultProject = projectOptions.find(p => p.id === lastProjectId && !p.is_locked)
+        ?? projectOptions.find(p => !p.is_locked);
     useEffect(() => {
         if (!showProjectModal || projectOptions.length === 0) return;
         const current = projectOptions.find(p => p.id === selectedProjectId && !p.is_locked);
@@ -535,6 +539,7 @@ export const PlantManager = () => {
         onSuccess: (result, variables) => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             queryClient.invalidateQueries({ queryKey: ['project', variables.projectId] });
+            setLastProjectId(variables.projectId);
             try { localStorage.setItem(LAST_PROJECT_KEY, variables.projectId); } catch { /* storage unavailable */ }
             const projectName = projectOptions.find(p => p.id === variables.projectId)?.name ?? 'project';
             const skippedNote = result.skipped ? ` (${result.skipped} already in it)` : '';
@@ -1479,18 +1484,67 @@ export const PlantManager = () => {
 
                 {/* ── Bulk selection floating toolbar ───────────────────────── */}
                 {!isCreating && !editingPlantId && selectedPlantIds.length > 0 && !showProjectModal && (
-                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-foreground text-background px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-start gap-2.5 sm:gap-3 z-50 w-[calc(100%-2rem)] sm:w-auto max-w-lg">
+                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-foreground text-background px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-start gap-2.5 sm:gap-3 z-50 w-[calc(100%-2rem)] sm:w-auto max-w-xl">
                         <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{selectedPlantIds.length} plant(s) selected</span>
                         <Separator orientation="vertical" className="hidden sm:block h-4 bg-background/30" />
                         <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => setProjectModalPlantIds(selectedPlantIds)}
-                                className="flex-1 sm:flex-none gap-1.5 text-foreground h-8 text-xs sm:text-sm"
-                            >
-                                <FolderOpen size={13} /> Add to Project
-                            </Button>
+                            {/* One click adds to the default project; the arrow picks another */}
+                            <div className="flex flex-1 sm:flex-none min-w-0">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={!defaultProject || addPlantsToProjectMutation.isPending}
+                                    onClick={() => defaultProject && addPlantsToProjectMutation.mutate({ projectId: defaultProject.id, plantIds: selectedPlantIds })}
+                                    title={defaultProject ? `Add the selected plants to ${defaultProject.name}` : undefined}
+                                    className="flex-1 min-w-0 gap-1.5 text-foreground h-8 text-xs sm:text-sm rounded-r-none"
+                                >
+                                    {addPlantsToProjectMutation.isPending
+                                        ? <><Loader2 size={13} className="animate-spin shrink-0" /> Adding…</>
+                                        : <>
+                                            <FolderPlus size={13} className="shrink-0" />
+                                            <span className="truncate max-w-[180px]">
+                                                {isProjectsLoading ? 'Loading projects…'
+                                                    : defaultProject ? `Add to ${defaultProject.name}`
+                                                    : 'No unlocked projects'}
+                                            </span>
+                                        </>}
+                                </Button>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            disabled={projectOptions.length === 0 || addPlantsToProjectMutation.isPending}
+                                            aria-label="Add to a different project"
+                                            className="h-8 px-2 text-foreground rounded-l-none border-l border-foreground/15"
+                                        >
+                                            <ChevronDown size={14} />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent side="top" align="end" className="w-64 max-h-72 overflow-y-auto">
+                                        <DropdownMenuLabel className="text-xs text-muted-foreground font-medium">
+                                            Add {selectedPlantIds.length} plant(s) to…
+                                        </DropdownMenuLabel>
+                                        <DropdownMenuSeparator />
+                                        {projectOptions.map(proj => (
+                                            <DropdownMenuItem
+                                                key={proj.id}
+                                                disabled={proj.is_locked}
+                                                onClick={() => addPlantsToProjectMutation.mutate({ projectId: proj.id, plantIds: selectedPlantIds })}
+                                                className="gap-2"
+                                            >
+                                                {proj.is_locked
+                                                    ? <Lock size={13} className="shrink-0 text-muted-foreground" />
+                                                    : <FolderPlus size={13} className="shrink-0 text-muted-foreground" />}
+                                                <span className="truncate">{proj.name}</span>
+                                                {proj.id === defaultProject?.id && (
+                                                    <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider text-primary/80">Default</span>
+                                                )}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                             <Button
                                 size="sm"
                                 variant="ghost"
