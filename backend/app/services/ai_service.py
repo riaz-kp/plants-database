@@ -72,7 +72,7 @@ async def generate_plant_details(
                     "content": prompt,
                 }
             ],
-            model="groq/compound",
+            model="openai/gpt-oss-120b",
             temperature=0.2,
             max_tokens=2048,
             top_p=0.95
