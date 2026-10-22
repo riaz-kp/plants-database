@@ -219,6 +219,18 @@ function ProjectBoqPdfDoc({ project, imgCache, dateStr }: BoqPdfProps) {
                                 </Svg>
                                 <Text style={{ fontSize: 9.5, color: C.dark }}>{dateStr}</Text>
                             </View>
+                            <View style={[s.metaItem, { marginTop: 4 }]}>
+                                <Text style={{ fontSize: 9.5, color: C.dark }}>
+                                    <Text style={s.metaBold}>Landscape Architect: </Text>
+                                    {project.landscape_architect || '—'}
+                                </Text>
+                            </View>
+                            <View style={s.metaItem}>
+                                <Text style={{ fontSize: 9.5, color: C.dark }}>
+                                    <Text style={s.metaBold}>Architect: </Text>
+                                    {project.architect || '—'}
+                                </Text>
+                            </View>
                         </View>
                     </View>
                     

@@ -128,6 +128,8 @@ async def _cloudinary_url(raw_url: Optional[str]) -> Optional[str]:
     clean = _clean_url(raw_url)
     if not clean:
         return None
+    if "res.cloudinary.com" in clean:
+        return clean  # already uploaded (e.g. by the step-by-step importer)
     try:
         return await upload_image_from_url(clean, folder="plants")
     except Exception as exc:
@@ -231,6 +233,7 @@ async def _process_single_row(
     results: Dict[str, Any],
     hierarchy_ranks,
     ignore_duplicates: bool = False,
+    skip_ai: bool = False,
 ) -> None:
     """Shared logic: build taxonomy, AI-fill, upload images, create Plant."""
     try:
@@ -277,7 +280,7 @@ async def _process_single_row(
 
         # 4. AI autofill for missing fields
         ai_icon_url = ai_image_url = None
-        needs_ai = not all([
+        needs_ai = not skip_ai and not all([
             description, common_diseases,
             care_water, care_sunlight, care_soil, care_maintenance,
             csv_icon_url, csv_image_url,
@@ -366,7 +369,9 @@ async def _process_single_row(
         results["errors"].append(f"Row {row_idx}: {exc}")
 
 
-async def process_rows_import(db: AsyncSession, rows: list, ignore_duplicates: bool = False) -> Dict[str, Any]:
+async def process_rows_import(
+    db: AsyncSession, rows: list, ignore_duplicates: bool = False, skip_ai: bool = False
+) -> Dict[str, Any]:
     """Import plants from a pre-edited list of row dicts (from the frontend editor)."""
     hierarchy_ranks = [
         Rank.KINGDOM, Rank.DIVISION, Rank.CLASS,
@@ -382,7 +387,10 @@ async def process_rows_import(db: AsyncSession, rows: list, ignore_duplicates: b
 
     results: Dict[str, Any] = {"success": 0, "failed": 0, "errors": []}
     for idx, row in enumerate(rows, start=1):
-        await _process_single_row(db, row, idx, results, hierarchy_ranks, ignore_duplicates=ignore_duplicates)
+        await _process_single_row(
+            db, row, idx, results, hierarchy_ranks,
+            ignore_duplicates=ignore_duplicates, skip_ai=skip_ai,
+        )
     await db.commit()
     return results
 
@@ -499,7 +507,7 @@ async def process_csv_import(db: AsyncSession, file_content: bytes) -> Dict[str,
             ai_icon_url  = None
             ai_image_url = None
 
-            needs_ai = not all([
+            needs_ai = not skip_ai and not all([
                 description, common_diseases,
                 care_water, care_sunlight, care_soil, care_maintenance,
                 csv_icon_url, csv_image_url,

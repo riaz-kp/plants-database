@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
-from app.services.import_service import process_csv_import, preview_csv, process_rows_import
+from app.services.import_service import process_csv_import, preview_csv, process_rows_import, find_duplicates_in_rows
 from app.models.project import Project, ProjectPlant
 from app.models.plant import Plant
 from app.models.taxon import Taxon
@@ -75,16 +75,28 @@ async def import_plants_csv(file: UploadFile = File(...),
     except Exception as e:
         raise HTTPException(500, f'Import failed: {e}')
 
+# ── Duplicate check for rows (no DB writes) ─────────────────────────────────
+@router.post('/import/rows/duplicates')
+async def check_rows_duplicates(
+    rows: List[Dict[str, str]] = Body(...),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """Return the rows that already exist in the catalog, before importing anything."""
+    return {"duplicates": await find_duplicates_in_rows(db, rows)}
+
+
 # ── JSON Rows Import (from editable preview page) ────────────────────────────
 @router.post('/import/rows')
 async def import_plants_rows(
     rows: List[Dict[str, str]] = Body(...),
     ignore_duplicates: bool = Query(False),
+    skip_ai: bool = Query(False),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """Import plants from pre-edited JSON rows (output from the preview editor)."""
+    """Import plants from pre-edited JSON rows (output from the preview editor).
+    skip_ai=true when the caller already ran the AI autofill step itself."""
     try:
-        result = await process_rows_import(db, rows, ignore_duplicates=ignore_duplicates)
+        result = await process_rows_import(db, rows, ignore_duplicates=ignore_duplicates, skip_ai=skip_ai)
         if isinstance(result, dict) and result.get("has_duplicates"):
             raise HTTPException(
                 status_code=409,

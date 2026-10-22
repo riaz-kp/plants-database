@@ -23,14 +23,27 @@ export const ioApi = {
         return response.data;
     },
 
-    importRows: async (rows: Record<string, string>[], ignoreDuplicates?: boolean): Promise<{
+    findDuplicateRows: async (rows: Record<string, string>[]): Promise<{
+        duplicates: Array<{
+            row_index: number;
+            common_name: string;
+            scientific_name: string;
+            existing_plant_id?: string;
+        }>;
+    }> => {
+        const response = await client.post("/import/rows/duplicates", rows);
+        return response.data;
+    },
+
+    importRows: async (rows: Record<string, string>[], ignoreDuplicates?: boolean, skipAi?: boolean): Promise<{
         success: number;
         failed: number;
         errors: string[];
     }> => {
-        const response = await client.post("/import/rows", rows, {
-            params: ignoreDuplicates !== undefined ? { ignore_duplicates: ignoreDuplicates } : undefined
-        });
+        const params: Record<string, boolean> = {};
+        if (ignoreDuplicates !== undefined) params.ignore_duplicates = ignoreDuplicates;
+        if (skipAi !== undefined) params.skip_ai = skipAi;
+        const response = await client.post("/import/rows", rows, { params });
         return response.data;
     },
 

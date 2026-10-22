@@ -16,6 +16,9 @@ export interface Project {
     client_name?: string;
     location?: string;
     description?: string;
+    landscape_architect?: string;
+    architect?: string;
+    is_locked: boolean;
     created_at: string;
     updated_at: string;
     plants: ProjectPlant[];
@@ -26,6 +29,8 @@ export interface ProjectCreate {
     client_name?: string;
     location?: string;
     description?: string;
+    landscape_architect?: string;
+    architect?: string;
 }
 
 export interface ProjectPlantCreate {
