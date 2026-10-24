@@ -10,7 +10,7 @@ if "neon.tech" in str(settings.SQLALCHEMY_DATABASE_URI):
 
 engine = create_async_engine(
     str(settings.SQLALCHEMY_DATABASE_URI),
-    echo=True,
+    echo=settings.SQL_ECHO,
     future=True,
     connect_args=connect_args,
     pool_pre_ping=True,

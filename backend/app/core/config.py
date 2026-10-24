@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "plants_db"
     POSTGRES_PORT: str = "5432"
-    
+    # Log every SQL statement (noisy; for local debugging only)
+    SQL_ECHO: bool = False
+
     # SQLALCHEMY_DATABASE_URI will be assembled below
     
     # Cloudinary Config (Image Uploads)

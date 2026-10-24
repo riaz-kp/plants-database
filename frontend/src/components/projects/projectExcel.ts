@@ -9,7 +9,7 @@
 import ExcelJS from 'exceljs';
 import type { Project } from '../../types/project';
 import { imgToDataUrl } from '../../utils/pdf-images';
-import { groupByCategory, downloadBlob } from './ProjectPdfShared';
+import { groupByCategory, downloadBlob } from './projectExportUtils';
 
 const X = {
     primary: 'FF1B3B2B',

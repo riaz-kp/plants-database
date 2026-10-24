@@ -5,7 +5,8 @@ import path from 'path';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [TanStackRouterVite(), react()],
+  // autoCodeSplitting: each page's code downloads when that page is first opened
+  plugins: [TanStackRouterVite({ autoCodeSplitting: true }), react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -25,7 +26,8 @@ export default defineConfig({
         manualChunks: {
           'vendor': ['react', 'react-dom', '@tanstack/react-router'],
           'ui-core': ['@tanstack/react-query', 'axios', 'lucide-react'],
-          'pdf-libs': ['@react-pdf/renderer'],
+          // @react-pdf/renderer and exceljs are left out on purpose: as their own
+          // chunks they were preloaded on every page; now they load on first export
           'radix': [
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',

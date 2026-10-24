@@ -9,7 +9,7 @@ import {
 
 import { projectsApi } from '../../api/projects';
 import { projectsQueryOptions } from '../../api/queryOptions';
-import type { ProjectCreate, Project } from '../../types/project';
+import type { ProjectCreate, ProjectSummary } from '../../types/project';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { ProjectFormDialog } from './ProjectFormDialog';
@@ -45,8 +45,8 @@ import {
 
 /* ─── Memoized Items ─── */
 interface ProjectItemProps {
-    project: Project;
-    onEdit: (project: Project) => void;
+    project: ProjectSummary;
+    onEdit: (project: ProjectSummary) => void;
     onDelete: (id: string, name: string) => void;
     onDuplicate: (id: string) => void;
 }
@@ -137,7 +137,7 @@ const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Projec
                     <div className="flex items-center justify-between mt-auto pt-3 border-t border-border">
                         <Badge variant="secondary" className="text-xs font-medium">
                             <Leaf className="w-3 h-3 mr-1" />
-                            {project.plants?.length ?? 0} {project.plants?.length === 1 ? 'plant' : 'plants'}
+                            {project.plant_count} {project.plant_count === 1 ? 'plant' : 'plants'}
                         </Badge>
                         <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                             <CalendarDays className="w-3 h-3" />
@@ -177,7 +177,7 @@ const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Pr
             </TableCell>
             <TableCell>
                 <Badge variant="secondary" className="tabular-nums">
-                    {project.plants?.length ?? 0}
+                    {project.plant_count}
                 </Badge>
             </TableCell>
             <TableCell>
@@ -206,7 +206,7 @@ export const ProjectManager = () => {
     }, [searchTerm]);
 
     const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const [editingProject, setEditingProject] = useState<Project | null>(null);
+    const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
 
     const projectsParams = useMemo(() => ({
         skip: (currentPage - 1) * PAGE_SIZE,
@@ -291,7 +291,7 @@ export const ProjectManager = () => {
         setIsDialogOpen(true);
     }, []);
 
-    const openEdit = useCallback((project: Project) => {
+    const openEdit = useCallback((project: ProjectSummary) => {
         setEditingProject(project);
         setIsDialogOpen(true);
     }, []);

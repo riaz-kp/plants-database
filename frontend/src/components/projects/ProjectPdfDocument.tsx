@@ -24,8 +24,9 @@ import type { Project } from '../../types/project';
 import type { TaxonTree } from '../../types/taxon';
 import {
     PDF, PAGE_STYLE, ts, DocHeader, DocFooter, GroupedRows, PlantThumb,
-    groupByCategory, scientificName, pdfDate, downloadBlob,
+    scientificName,
 } from './ProjectPdfShared';
+import { groupByCategory, pdfDate, downloadBlob } from './projectExportUtils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function cleanVal(val: string | null | undefined): string {

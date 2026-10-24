@@ -8,22 +8,20 @@ import {
     Link2, Copy, Check, RefreshCw, FileSpreadsheet,
     CalendarDays, Trees, Building2, ClipboardList, Receipt, Loader2,
 } from 'lucide-react';
-import { exportProjectBoqPdf } from './ProjectBoqPdfDocument';
-import { exportProjectQuotationPdf } from './ProjectQuotationPdfDocument';
-import { exportProjectBoqExcel, exportProjectQuotationExcel } from './projectExcel';
-import { pdfDate } from './ProjectPdfShared';
+// The PDF/Excel exporters (and @react-pdf/renderer, exceljs) load on first export
+import { pdfDate } from './projectExportUtils';
 
 import { projectsApi } from '../../api/projects';
 import type { ShareLinkInfo } from '../../api/projects';
 import { plantsApi } from '../../api/plants';
-import { taxonomyApi } from '../../api/taxonomy';
+import { projectDetailsQueryOptions, taxonomyTreeQueryOptions } from '../../api/queryOptions';
 import type { ProjectPlantCreate, ProjectCreate, Project } from '../../types/project';
 import type { Plant } from '../../types/plant';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { ProjectFormDialog } from './ProjectFormDialog';
 import { useFloatingTableHeader } from '../../hooks/use-floating-table-header';
-import { cn } from '../../lib-frontend/utils';
+import { cn, cloudinaryThumb } from '../../lib-frontend/utils';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -113,7 +111,7 @@ const ProjectPlantRowMemo = memo(({ pp, idx, locked, onEdit, onDelete }: Project
                     <div className="shrink-0">
                         {pp.plant?.icon_url ? (
                             <img
-                                src={pp.plant.icon_url}
+                                src={cloudinaryThumb(pp.plant.icon_url, 40)}
                                 alt=""
                                 className="w-10 h-10 object-cover rounded-lg border border-border/50"
                             />
@@ -229,7 +227,7 @@ const ProjectPlantCardMemo = memo(({ pp, idx, locked, onEdit, onDelete }: Projec
                 aria-label={`Open ${plant?.common_name ?? 'plant'}`}
             >
                 {image ? (
-                    <img src={image} alt="" loading="lazy" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    <img src={cloudinaryThumb(image, 360, 'limit')} alt="" loading="lazy"className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
                         <Leaf size={28} className="text-muted-foreground/30" />
@@ -357,7 +355,7 @@ function PlantPicker({ plants, value, onChange, addedIds }: {
                             )}
                         >
                             {plant.icon_url ? (
-                                <img src={plant.icon_url} alt="" className="w-8 h-8 rounded-md object-cover shrink-0" />
+                                <img src={cloudinaryThumb(plant.icon_url, 32)} alt="" className="w-8 h-8 rounded-md object-cover shrink-0" />
                             ) : (
                                 <span className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
                                     <Leaf size={13} className="text-muted-foreground/50" />
@@ -556,7 +554,7 @@ const ProjectBoqRow = ({
                 <div className="flex justify-center">
                     {pp.plant?.icon_url ? (
                         <img
-                            src={pp.plant.icon_url}
+                            src={cloudinaryThumb(pp.plant.icon_url, 48)}
                             alt=""
                             className="w-12 h-12 object-cover rounded-lg border border-border/50 shadow-sm"
                         />
@@ -808,7 +806,7 @@ const ProjectQuotationRow = ({
                 <div className="flex justify-center">
                     {pp.plant?.icon_url ? (
                         <img
-                            src={pp.plant.icon_url}
+                            src={cloudinaryThumb(pp.plant.icon_url, 48)}
                             alt=""
                             className="w-12 h-12 object-cover rounded-lg border border-border/50 shadow-sm"
                         />
@@ -988,21 +986,17 @@ export const ProjectDetails = () => {
 
     /* ── Queries ── */
     const { data: project, isLoading } = useQuery({
-        queryKey: ['project', id],
-        queryFn: () => projectsApi.getById(id!),
+        ...projectDetailsQueryOptions(id!),
         enabled: !!id,
     });
 
+    // Every plant (~330 KB), only needed by the "Add plant" picker
     const { data: allPlantsData } = useQuery({
         queryKey: ['plants', 'all-picker'],
         queryFn: () => plantsApi.getAll({ limit: 1000 }), // Load more for picker
+        enabled: isDialogOpen,
     });
     const allPlants = allPlantsData?.items || [];
-
-    const { data: taxTree } = useQuery({
-        queryKey: ['taxonomy', 'tree'],
-        queryFn: () => taxonomyApi.getTree(),
-    });
 
     const handleDownloadPdf = async () => {
         if (!project) return;
@@ -1010,7 +1004,8 @@ export const ProjectDetails = () => {
         try {
             const { prepareProjectImageCache } = await import('../../utils/pdf-images');
             const imgCache = await prepareProjectImageCache(project);
-            
+            const taxTree = await queryClient.fetchQuery(taxonomyTreeQueryOptions());
+
             const { exportProjectPdfNew } = await import('./ProjectPdfDocument');
             await exportProjectPdfNew(project, taxTree, imgCache, project.name);
         } catch (e) {
@@ -1027,6 +1022,7 @@ export const ProjectDetails = () => {
         try {
             const { prepareProjectImageCache } = await import('../../utils/pdf-images');
             const imgCache = await prepareProjectImageCache(project);
+            const { exportProjectQuotationPdf } = await import('./ProjectQuotationPdfDocument');
             await exportProjectQuotationPdf(project, imgCache, project.name, pdfDate(project.quotation_date));
         } catch (e) {
             console.error(e);
@@ -1042,6 +1038,7 @@ export const ProjectDetails = () => {
         try {
             const { prepareProjectImageCache } = await import('../../utils/pdf-images');
             const imgCache = await prepareProjectImageCache(project);
+            const { exportProjectBoqPdf } = await import('./ProjectBoqPdfDocument');
             await exportProjectBoqPdf(project, imgCache, project.name, pdfDate(project.boq_date));
         } catch (e) {
             console.error(e);
@@ -1055,6 +1052,7 @@ export const ProjectDetails = () => {
         if (!project) return;
         setExcelLoading(true);
         try {
+            const { exportProjectBoqExcel, exportProjectQuotationExcel } = await import('./projectExcel');
             if (viewMode === 'boq') await exportProjectBoqExcel(project, pdfDate(project.boq_date));
             else await exportProjectQuotationExcel(project, pdfDate(project.quotation_date));
         } catch (e) {

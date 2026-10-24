@@ -63,6 +63,16 @@ class ProjectResponse(ProjectBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+class ProjectSummary(ProjectBase):
+    """A project as shown in lists: the plant count instead of every plant."""
+    id: uuid.UUID
+    is_locked: bool = False
+    created_at: datetime
+    updated_at: datetime
+    plant_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ProjectListResponse(BaseModel):
-    items: List[ProjectResponse]
+    items: List[ProjectSummary]
     total: int
