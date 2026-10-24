@@ -60,6 +60,8 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -515,6 +517,9 @@ export const PlantManager = () => {
     });
     const defaultProject = projectOptions.find(p => p.id === lastProjectId && !p.is_locked)
         ?? projectOptions.find(p => !p.is_locked);
+    // Project picked in the bulk toolbar's dropdown; it only changes the target, adding is a separate click
+    const [bulkProjectId, setBulkProjectId] = useState<string | null>(null);
+    const bulkTargetProject = projectOptions.find(p => p.id === bulkProjectId && !p.is_locked) ?? defaultProject;
     useEffect(() => {
         if (!showProjectModal || projectOptions.length === 0) return;
         const current = projectOptions.find(p => p.id === selectedProjectId && !p.is_locked);
@@ -1481,14 +1486,14 @@ export const PlantManager = () => {
                         <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{selectedPlantIds.length} plant(s) selected</span>
                         <Separator orientation="vertical" className="hidden sm:block h-4 bg-background/30" />
                         <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-                            {/* One click adds to the default project; the arrow picks another */}
+                            {/* The button adds to the target project; the arrow only changes the target */}
                             <div className="flex flex-1 sm:flex-none min-w-0">
                                 <Button
                                     size="sm"
                                     variant="secondary"
-                                    disabled={!defaultProject || addPlantsToProjectMutation.isPending}
-                                    onClick={() => defaultProject && addPlantsToProjectMutation.mutate({ projectId: defaultProject.id, plantIds: selectedPlantIds })}
-                                    title={defaultProject ? `Add the selected plants to ${defaultProject.name}` : undefined}
+                                    disabled={!bulkTargetProject || addPlantsToProjectMutation.isPending}
+                                    onClick={() => bulkTargetProject && addPlantsToProjectMutation.mutate({ projectId: bulkTargetProject.id, plantIds: selectedPlantIds })}
+                                    title={bulkTargetProject ? `Add the selected plants to ${bulkTargetProject.name}` : undefined}
                                     className="flex-1 min-w-0 gap-1.5 text-foreground h-8 text-xs sm:text-sm rounded-r-none"
                                 >
                                     {addPlantsToProjectMutation.isPending
@@ -1497,7 +1502,7 @@ export const PlantManager = () => {
                                             <FolderPlus size={13} className="shrink-0" />
                                             <span className="truncate max-w-[180px]">
                                                 {isProjectsLoading ? 'Loading projects…'
-                                                    : defaultProject ? `Add to ${defaultProject.name}`
+                                                    : bulkTargetProject ? `Add to ${bulkTargetProject.name}`
                                                     : 'No unlocked projects'}
                                             </span>
                                         </>}
@@ -1508,7 +1513,7 @@ export const PlantManager = () => {
                                             size="sm"
                                             variant="secondary"
                                             disabled={projectOptions.length === 0 || addPlantsToProjectMutation.isPending}
-                                            aria-label="Add to a different project"
+                                            aria-label="Choose a different project"
                                             className="h-8 px-2 text-foreground rounded-l-none border-l border-foreground/15"
                                         >
                                             <ChevronDown size={14} />
@@ -1516,25 +1521,25 @@ export const PlantManager = () => {
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent side="top" align="end" className="w-64 max-h-72 overflow-y-auto">
                                         <DropdownMenuLabel className="text-xs text-muted-foreground font-medium">
-                                            Add {selectedPlantIds.length} plant(s) to…
+                                            Choose project
                                         </DropdownMenuLabel>
                                         <DropdownMenuSeparator />
-                                        {projectOptions.map(proj => (
-                                            <DropdownMenuItem
-                                                key={proj.id}
-                                                disabled={proj.is_locked}
-                                                onClick={() => addPlantsToProjectMutation.mutate({ projectId: proj.id, plantIds: selectedPlantIds })}
-                                                className="gap-2"
-                                            >
-                                                {proj.is_locked
-                                                    ? <Lock size={13} className="shrink-0 text-muted-foreground" />
-                                                    : <FolderPlus size={13} className="shrink-0 text-muted-foreground" />}
-                                                <span className="truncate">{proj.name}</span>
-                                                {proj.id === defaultProject?.id && (
-                                                    <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider text-primary/80">Default</span>
-                                                )}
-                                            </DropdownMenuItem>
-                                        ))}
+                                        <DropdownMenuRadioGroup value={bulkTargetProject?.id ?? ''} onValueChange={setBulkProjectId}>
+                                            {projectOptions.map(proj => (
+                                                <DropdownMenuRadioItem
+                                                    key={proj.id}
+                                                    value={proj.id}
+                                                    disabled={proj.is_locked}
+                                                    className="gap-2"
+                                                >
+                                                    {proj.is_locked && <Lock size={13} className="shrink-0 text-muted-foreground" />}
+                                                    <span className="truncate">{proj.name}</span>
+                                                    {proj.id === defaultProject?.id && (
+                                                        <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider text-primary/80">Default</span>
+                                                    )}
+                                                </DropdownMenuRadioItem>
+                                            ))}
+                                        </DropdownMenuRadioGroup>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
