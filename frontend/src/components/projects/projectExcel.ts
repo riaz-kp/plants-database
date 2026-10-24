@@ -109,7 +109,7 @@ async function plantThumbnails(project: Project): Promise<Map<string, string>> {
     await Promise.all(project.plants.map(async pp => {
         const p = pp.plant;
         if (!p) return;
-        const src = await imgToDataUrl(p.icon_url || p.image_url);
+        const src = await imgToDataUrl(p.icon_url || p.image_url, { w: 96, h: 96 });
         const thumb = src ? await toThumbnail(src) : null;
         if (thumb) thumbs.set(p.id, thumb);
     }));

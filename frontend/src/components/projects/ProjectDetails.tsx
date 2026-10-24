@@ -1021,7 +1021,7 @@ export const ProjectDetails = () => {
         setPdfQuotationLoading(true);
         try {
             const { prepareProjectImageCache } = await import('../../utils/pdf-images');
-            const imgCache = await prepareProjectImageCache(project);
+            const imgCache = await prepareProjectImageCache(project, { cards: false });
             const { exportProjectQuotationPdf } = await import('./ProjectQuotationPdfDocument');
             await exportProjectQuotationPdf(project, imgCache, project.name, pdfDate(project.quotation_date));
         } catch (e) {
@@ -1037,7 +1037,7 @@ export const ProjectDetails = () => {
         setPdfBoqLoading(true);
         try {
             const { prepareProjectImageCache } = await import('../../utils/pdf-images');
-            const imgCache = await prepareProjectImageCache(project);
+            const imgCache = await prepareProjectImageCache(project, { cards: false });
             const { exportProjectBoqPdf } = await import('./ProjectBoqPdfDocument');
             await exportProjectBoqPdf(project, imgCache, project.name, pdfDate(project.boq_date));
         } catch (e) {
