@@ -8,8 +8,9 @@ import { Document, Page, View, Text, StyleSheet, pdf } from '@react-pdf/renderer
 import type { Project } from '../../types/project';
 import {
     PDF, PAGE_STYLE, ts, DocHeader, DocFooter, GroupedRows, PlantThumb,
-    groupByCategory, scientificName, fmtQty, pdfDate, downloadBlob,
+    scientificName, fmtQty,
 } from './ProjectPdfShared';
+import { groupByCategory, pdfDate, downloadBlob } from './projectExportUtils';
 
 const s = StyleSheet.create({
     page: PAGE_STYLE,

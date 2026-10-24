@@ -49,7 +49,12 @@ export interface ProjectPlantCreate {
 
 export type ProjectResponse = Project;
 
+/** A project as listed: how many plants it has, not the plants themselves. */
+export interface ProjectSummary extends Omit<Project, 'plants'> {
+    plant_count: number;
+}
+
 export interface ProjectListResponse {
-    items: ProjectResponse[];
+    items: ProjectSummary[];
     total: number;
 }

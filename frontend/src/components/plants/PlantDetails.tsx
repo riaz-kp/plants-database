@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { plantsApi } from '../../api/plants';
 import { taxonomyApi } from '../../api/taxonomy';
 import type { TaxonTree } from '../../types/taxon';
+import { cloudinaryThumb } from '../../lib-frontend/utils';
 import {
     ArrowLeft, Edit3, Bug, ListTree, Info, Sprout,
     Droplets, Sun, Wind, ScanText, MapPin, Tag
@@ -76,7 +77,7 @@ export const PlantDetails = () => {
                     <div className="flex items-center gap-4 mb-3">
                         {plant.icon_url && (
                             <img
-                                src={plant.icon_url}
+                                src={cloudinaryThumb(plant.icon_url, 72)}
                                 alt={`${plant.common_name} icon`}
                                 className="w-18 h-18 object-cover rounded-xl shadow-md border border-border"
                                 style={{ width: 72, height: 72 }}
@@ -102,7 +103,7 @@ export const PlantDetails = () => {
                 </div>
                 {plant.image_url && (
                     <img
-                        src={plant.image_url}
+                        src={cloudinaryThumb(plant.image_url, 800, 'limit')}
                         alt={`${plant.common_name} full view`}
                         className="flex-[1.2] min-w-[280px] max-h-[400px] w-full object-cover rounded-2xl shadow-xl"
                     />

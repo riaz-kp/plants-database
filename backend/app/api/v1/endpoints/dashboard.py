@@ -19,31 +19,14 @@ async def get_dashboard_stats(
     """
     Get total counts for dashboard overview.
     This replaces several large API calls that were only used for counts.
+    All four counts come back in one query, so one database round trip.
     """
-    
-    # 1. Count Plants
-    plants_count_stmt = select(func.count(Plant.id))
-    plants_count_res = await db.execute(plants_count_stmt)
-    total_plants = plants_count_res.scalar_one()
+    stmt = select(
+        select(func.count(Plant.id)).scalar_subquery().label("total_plants"),
+        select(func.count(Taxon.id)).scalar_subquery().label("total_taxonomy_nodes"),
+        select(func.count(Category.id)).scalar_subquery().label("total_categories"),
+        select(func.count(Project.id)).scalar_subquery().label("total_projects"),
+    )
+    row = (await db.execute(stmt)).one()
 
-    # 2. Count Taxonomy Nodes
-    taxon_count_stmt = select(func.count(Taxon.id))
-    taxon_count_res = await db.execute(taxon_count_stmt)
-    total_taxonomy_nodes = taxon_count_res.scalar_one()
-
-    # 3. Count Categories
-    categories_count_stmt = select(func.count(Category.id))
-    categories_count_res = await db.execute(categories_count_stmt)
-    total_categories = categories_count_res.scalar_one()
-
-    # 4. Count Projects
-    projects_count_stmt = select(func.count(Project.id))
-    projects_count_res = await db.execute(projects_count_stmt)
-    total_projects = projects_count_res.scalar_one()
-
-    return {
-        "total_plants": total_plants,
-        "total_taxonomy_nodes": total_taxonomy_nodes,
-        "total_categories": total_categories,
-        "total_projects": total_projects
-    }
+    return row._asdict()

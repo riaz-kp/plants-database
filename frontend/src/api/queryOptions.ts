@@ -37,10 +37,12 @@ export const projectsQueryOptions = (params?: { skip?: number; limit?: number; s
     staleTime: 5 * 60 * 1000,
 });
 
+// Same key the project page uses and invalidates, so the route's prefetch is reused.
+// Short staleTime: long enough to cover prefetch → mount, but revisits still refresh.
 export const projectDetailsQueryOptions = (id: string) => queryOptions({
-    queryKey: ['projects', 'detail', id],
+    queryKey: ['project', id],
     queryFn: () => projectsApi.getById(id),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
 });
 
 export const projectShareQueryOptions = (token: string) => queryOptions({

@@ -38,12 +38,7 @@ export const PAGE_STYLE = {
 } as const;
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
-/** Long date for documents; `isoDate` ("YYYY-MM-DD") defaults to today. */
-export const pdfDate = (isoDate?: string | null) => {
-    const [y, m, d] = (isoDate ?? '').split('-').map(Number);
-    const date = y && m && d ? new Date(y, m - 1, d) : new Date();
-    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-};
+// (pdfDate, groupByCategory and downloadBlob live in projectExportUtils.ts)
 
 export const fmtMoney = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -53,29 +48,6 @@ export const fmtQty = (n: number | null | undefined) =>
 
 export const scientificName = (pp: Project['plants'][number]) =>
     pp.plant?.scientific_name || pp.plant?.taxon?.name || '—';
-
-/** Plants grouped by category, categories A→Z. */
-export function groupByCategory(plants: Project['plants']) {
-    const groups = new Map<string, Project['plants']>();
-    for (const pp of plants) {
-        if (!pp.plant) continue;
-        const cat = pp.plant.category || 'Uncategorized';
-        if (!groups.has(cat)) groups.set(cat, []);
-        groups.get(cat)!.push(pp);
-    }
-    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-}
-
-/** Triggers a browser download of the rendered PDF. */
-export function downloadBlob(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    a.remove();
-}
 
 // ─── Document header ──────────────────────────────────────────────────────────
 const hs = StyleSheet.create({

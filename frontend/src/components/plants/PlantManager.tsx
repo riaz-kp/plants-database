@@ -11,7 +11,7 @@ import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { plantsQueryOptions, taxonomyTreeQueryOptions, categoriesQueryOptions, projectsQueryOptions } from '../../api/queryOptions';
 import { aiApi } from '../../api/ai';
-import { cn } from '../../lib-frontend/utils';
+import { cn, cloudinaryThumb } from '../../lib-frontend/utils';
 import { TaxonomyFormTable } from './TaxonomyFormTable';
 
 // Shadcn components
@@ -161,7 +161,7 @@ const PlantCardMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete, onA
             <div className="relative aspect-video w-full bg-muted overflow-hidden">
                 {displayImage ? (
                     <img
-                        src={displayImage}
+                        src={cloudinaryThumb(displayImage, 360, 'limit')}
                         alt={plant.common_name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
@@ -310,7 +310,7 @@ const PlantTableRowMemo = memo(({ plant, isSelected, onSelect, onEdit, onDelete,
             </TableCell>
             <TableCell className="px-2">
                 {plant.icon_url
-                    ? <img src={plant.icon_url} alt="" className="w-8 h-8 object-cover rounded-md" />
+                    ? <img src={cloudinaryThumb(plant.icon_url, 32)} alt="" className="w-8 h-8 object-cover rounded-md" />
                     : <div className="w-8 h-8 bg-muted rounded-md flex items-center justify-center"><Leaf size={12} className="text-muted-foreground" /></div>
                 }
             </TableCell>
@@ -417,11 +417,12 @@ export const PlantManager = () => {
     }, []);
 
     // Queries
+    // Projects are only needed once plants are picked for adding to one
     const {
         data: projectsData,
         isLoading: isProjectsLoading,
         error: projectsError
-    } = useQuery(projectsQueryOptions());
+    } = useQuery({ ...projectsQueryOptions(), enabled: selectedPlantIds.length > 0 || showProjectModal });
 
     // Pagination state
     const PAGE_SIZE = 20;
@@ -499,7 +500,11 @@ export const PlantManager = () => {
         }
     }, [currentPage, totalPages, plantsParams, queryClient, PAGE_SIZE]);
 
-    const { data: taxonomyTree } = useQuery(taxonomyTreeQueryOptions());
+    // The taxonomy tree (~190 KB) is only used by the plant form
+    const { data: taxonomyTree } = useQuery({
+        ...taxonomyTreeQueryOptions(),
+        enabled: isCreating || !!editingPlantId || !!(location.state as { editPlant?: unknown } | undefined)?.editPlant,
+    });
     const { data: categoriesOptions } = useQuery(categoriesQueryOptions());
 
 

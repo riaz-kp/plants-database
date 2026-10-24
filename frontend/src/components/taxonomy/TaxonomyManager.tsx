@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib-frontend/utils';
+import { cn, cloudinaryThumb } from '@/lib-frontend/utils';
 
 import {
     Files,
@@ -408,7 +408,7 @@ export const TaxonomyManager = () => {
                                 {associatedPlants.items.slice(0, 1).map(plant => (
                                     <div key={plant.id} className="flex gap-4 items-center bg-muted/30 p-3 rounded-xl border border-border/50 shadow-sm transition-all hover:bg-muted/50 group">
                                         {plant.icon_url ? (
-                                            <img src={plant.icon_url} alt={plant.common_name} className="w-12 h-12 rounded-lg object-cover bg-muted ring-1 ring-border/50" />
+                                            <img src={cloudinaryThumb(plant.icon_url, 48)} alt={plant.common_name} className="w-12 h-12 rounded-lg object-cover bg-muted ring-1 ring-border/50" />
                                         ) : (
                                             <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-muted-foreground/40 ring-1 ring-border/50">
                                                 <Leaf size={20} opacity={0.5} />

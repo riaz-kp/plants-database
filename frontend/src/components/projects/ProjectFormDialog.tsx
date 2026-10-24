@@ -16,7 +16,7 @@ import {
 interface ProjectFormDialogProps {
     open: boolean;
     /** The project being edited, or null to create a new one. */
-    project: Project | null;
+    project: Omit<Project, 'plants'> | null;
     isSaving: boolean;
     onClose: () => void;
     onSubmit: (data: ProjectCreate) => void;

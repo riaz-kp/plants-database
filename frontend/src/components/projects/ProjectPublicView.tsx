@@ -15,6 +15,7 @@ import type { Project } from '../../types/project';
 import type { Taxon } from '../../types/taxon';
 import type { TaxonTree } from '../../types/taxon';
 import { Leaf, MapPin, User, Calendar, AlertTriangle } from 'lucide-react';
+import { cloudinaryThumb } from '../../lib-frontend/utils';
 
 /* ── helpers ── */
 function cleanVal(val: string | null | undefined): string {
@@ -198,7 +199,7 @@ function GroupedInventory({ project }: { project: Project }) {
                                         <td>
                                             <div className="pv-plant-cell">
                                                 {p.icon_url && (
-                                                    <img src={p.icon_url} alt="" className="pv-icon" />
+                                                    <img src={cloudinaryThumb(p.icon_url, 30)} alt="" className="pv-icon" />
                                                 )}
                                                 <button
                                                     className="pv-plant-link"
@@ -251,7 +252,7 @@ function PlantCard({
             <div className="pv-pc-header">
                 <div className="pv-pc-header-left">
                     <div className="pv-pc-name-row">
-                        {p.icon_url && <img src={p.icon_url} alt="" className="pv-pc-icon" />}
+                        {p.icon_url && <img src={cloudinaryThumb(p.icon_url, 72)} alt="" className="pv-pc-icon" />}
                         <div>
                             <p className="pv-pc-index">#{index}</p>
                             <h2 className="pv-pc-name">{p.common_name}</h2>
@@ -268,7 +269,7 @@ function PlantCard({
                     </div>
                 </div>
                 {p.image_url && (
-                    <img src={p.image_url} alt={p.common_name} className="pv-pc-hero" />
+                    <img src={cloudinaryThumb(p.image_url, 400, 'limit')} alt={p.common_name} className="pv-pc-hero" />
                 )}
             </div>
 

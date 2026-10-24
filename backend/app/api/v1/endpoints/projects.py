@@ -16,7 +16,7 @@ from app.models.plant import Plant
 from app.models.share_link import ProjectShareLink
 from app.schemas.project import (
     ProjectCreate, ProjectResponse, ProjectPlantCreate, ProjectUpdate, ProjectListResponse,
-    ProjectLockUpdate, ProjectPlantsBulkCreate, ProjectPlantsBulkResult,
+    ProjectLockUpdate, ProjectPlantsBulkCreate, ProjectPlantsBulkResult, ProjectSummary,
 )
 from app.core.security import get_current_user
 
@@ -38,10 +38,10 @@ async def read_projects(
 ) -> Any:
     """
     Retrieve projects with pagination and search.
+    Lists only need how many plants each project has, so the plants
+    themselves are counted in SQL rather than loaded.
     """
-    query = select(Project).options(
-        selectinload(Project.plants).selectinload(ProjectPlant.plant).selectinload(Plant.taxon)
-    )
+    query = select(Project)
 
     if search:
         query = query.filter(or_(
@@ -68,11 +68,22 @@ async def read_projects(
     else:
         query = query.order_by(Project.updated_at.desc())
 
+    plant_count = (
+        select(func.count())
+        .select_from(ProjectPlant)
+        .where(ProjectPlant.project_id == Project.id)
+        .correlate(Project)
+        .scalar_subquery()
+    )
+
     # Apply pagination
-    query = query.offset(skip).limit(limit)
+    query = query.add_columns(plant_count).offset(skip).limit(limit)
     result = await db.execute(query)
-    items = result.scalars().all()
-    
+    items = [
+        ProjectSummary.model_validate(project).model_copy(update={"plant_count": count})
+        for project, count in result.all()
+    ]
+
     return {"items": items, "total": total}
 
 @router.post("/", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
