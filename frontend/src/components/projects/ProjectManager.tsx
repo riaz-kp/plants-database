@@ -350,37 +350,40 @@ export const ProjectManager = () => {
                         className="pl-9"
                     />
                 </div>
-                <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
-                    <SelectTrigger className="w-full sm:w-44">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="newest">Newest First</SelectItem>
-                        <SelectItem value="oldest">Oldest First</SelectItem>
-                        <SelectItem value="name-asc">Name (A–Z)</SelectItem>
-                        <SelectItem value="name-desc">Name (Z–A)</SelectItem>
-                    </SelectContent>
-                </Select>
-                {/* View toggle */}
-                <div className="flex items-center gap-1 border border-border rounded-lg p-1 bg-muted/30 shrink-0">
-                    <Button
-                        variant={viewMode === 'table' ? 'secondary' : 'ghost'}
-                        size="sm"
-                        className="h-7 px-2"
-                        onClick={() => setViewMode('table')}
-                        title="List view"
-                    >
-                        <List className="w-4 h-4" />
-                    </Button>
-                    <Button
-                        variant={viewMode === 'card' ? 'secondary' : 'ghost'}
-                        size="sm"
-                        className="h-7 px-2"
-                        onClick={() => setViewMode('card')}
-                        title="Card view"
-                    >
-                        <LayoutGrid className="w-4 h-4" />
-                    </Button>
+                {/* Sort + view toggle share one row on phones */}
+                <div className="flex items-center gap-2">
+                    <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+                        <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-44">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="newest">Newest First</SelectItem>
+                            <SelectItem value="oldest">Oldest First</SelectItem>
+                            <SelectItem value="name-asc">Name (A–Z)</SelectItem>
+                            <SelectItem value="name-desc">Name (Z–A)</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    {/* View toggle */}
+                    <div className="flex items-center gap-1 border border-border rounded-lg p-1 bg-muted/30 shrink-0">
+                        <Button
+                            variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setViewMode('table')}
+                            title="List view"
+                        >
+                            <List className="w-4 h-4" />
+                        </Button>
+                        <Button
+                            variant={viewMode === 'card' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setViewMode('card')}
+                            title="Card view"
+                        >
+                            <LayoutGrid className="w-4 h-4" />
+                        </Button>
+                    </div>
                 </div>
             </div>
 
