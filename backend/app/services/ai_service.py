@@ -1,23 +1,52 @@
+import asyncio
 import json
 import re
 from typing import Optional
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 from fastapi import HTTPException
 from app.core.config import settings
 from app.schemas.ai import PlantAIDetailsResponse, TaxonomyDetails
+
+GROQ_MODEL = "openai/gpt-oss-120b"
+
+
+def _groq_client() -> AsyncOpenAI:
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="Groq API Key is not configured")
+    return AsyncOpenAI(
+        api_key=settings.GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+
+
+def _extract_json(response_text: str) -> dict:
+    """Parse the JSON object out of a model reply (drops <think> blocks and markdown fences)."""
+    response_text = response_text.strip()
+
+    # Remove reasoning <think>...</think> tags if present
+    response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
+
+    # Strip potential markdown formatting
+    if response_text.startswith("```json"):
+        response_text = response_text[7:-3].strip()
+    elif response_text.startswith("```"):
+        response_text = response_text[3:-3].strip()
+
+    # Extract JSON object from first '{' to last '}'
+    start_idx = response_text.find("{")
+    end_idx = response_text.rfind("}")
+    if start_idx != -1 and end_idx != -1:
+        response_text = response_text[start_idx:end_idx + 1]
+
+    return json.loads(response_text)
+
 
 async def generate_plant_details(
     common_name: Optional[str] = None, 
     scientific_name: Optional[str] = None,
     valid_categories: Optional[list[str]] = None
 ) -> PlantAIDetailsResponse:
-    if not settings.GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="Groq API Key is not configured")
-
-    client = AsyncOpenAI(
-        api_key=settings.GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
-    )
+    client = _groq_client()
 
     plant_query = ""
     if scientific_name and common_name:
@@ -72,30 +101,13 @@ async def generate_plant_details(
                     "content": prompt,
                 }
             ],
-            model="openai/gpt-oss-120b",
+            model=GROQ_MODEL,
             temperature=0.2,
             max_tokens=2048,
             top_p=0.95
         )
         
-        response_text = response.choices[0].message.content.strip()
-        
-        # Remove reasoning <think>...</think> tags if present
-        response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
-        
-        # Strip potential markdown formatting
-        if response_text.startswith("```json"):
-            response_text = response_text[7:-3].strip()
-        elif response_text.startswith("```"):
-            response_text = response_text[3:-3].strip()
-            
-        # Extract JSON object from first '{' to last '}'
-        start_idx = response_text.find("{")
-        end_idx = response_text.rfind("}")
-        if start_idx != -1 and end_idx != -1:
-            response_text = response_text[start_idx:end_idx + 1]
-
-        data = json.loads(response_text)
+        data = _extract_json(response.choices[0].message.content)
         
         tax_data = data.get("taxonomy", {})
         taxonomy = TaxonomyDetails(
@@ -119,3 +131,71 @@ async def generate_plant_details(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate AI details: {str(e)}")
+
+
+async def generate_taxon_descriptions(taxa: list[dict]) -> list[Optional[str]]:
+    """Short plain-language descriptions for taxa, in the same order as `taxa`.
+
+    Each item has "rank", "name" and "lineage" (its ancestors, top-down, e.g. "Plantae › Tracheophyta").
+    Items the model skips come back as None.
+    """
+    if not taxa:
+        return []
+    client = _groq_client()
+
+    items = [
+        {"id": str(i), "rank": t["rank"], "name": t["name"], "lineage": t.get("lineage") or ""}
+        for i, t in enumerate(taxa)
+    ]
+    prompt = f"""
+    Write a short description for each plant taxon below, for a landscaping company's plant database.
+
+    Rules:
+    - One or two plain-language sentences, at most 30 words.
+    - Do not start with the taxon's name or rank; start with what it is, e.g. "Flowering plants with...".
+    - Each description must stand on its own; never refer to other items in the list.
+    - Kingdom to genus: say what sets the group apart and name a few well-known garden or landscape members.
+    - Species: describe the plant itself (growth form, leaves or flowers) and how it is typically used.
+    - A species may be given as just its epithet; its genus is the last name in its lineage.
+    - If you do not recognise a name, describe it only from its lineage (e.g. "A genus in the ... family.") rather than guessing.
+
+    Taxa:
+    {json.dumps(items, ensure_ascii=False)}
+
+    Respond with a JSON object mapping each "id" to its description, e.g. {{"0": "...", "1": "..."}}.
+    ONLY return the JSON object.
+    """
+
+    for attempt in range(6):
+        try:
+            response = await client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert botanist. Respond ONLY with valid raw JSON."
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                model=GROQ_MODEL,
+                temperature=0.2,
+                max_tokens=6000,
+                reasoning_effort="low",
+            )
+            break
+        except RateLimitError as e:
+            # Groq's per-minute token limit; wait as told, or back off
+            retry_after = e.response.headers.get("retry-after") if e.response is not None else None
+            try:
+                wait = float(retry_after) if retry_after else 15 * (attempt + 1)
+            except ValueError:
+                wait = 15 * (attempt + 1)
+            if attempt == 5:
+                raise
+            await asyncio.sleep(min(wait, 90) + 1)
+
+    data = _extract_json(response.choices[0].message.content or "")
+    descriptions: list[Optional[str]] = []
+    for i in range(len(taxa)):
+        text = data.get(str(i))
+        descriptions.append(text.strip() if isinstance(text, str) and text.strip() else None)
+    return descriptions

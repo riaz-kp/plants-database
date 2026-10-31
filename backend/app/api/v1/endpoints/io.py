@@ -1,5 +1,5 @@
 from typing import Any, List, Dict
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Body, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Body, Query
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.services.import_service import process_csv_import, preview_csv, process_rows_import, find_duplicates_in_rows
+from app.services.taxon_description_service import fill_missing_descriptions_in_background
 from app.models.project import Project, ProjectPlant
 from app.models.plant import Plant
 from app.models.taxon import Taxon
@@ -63,13 +64,17 @@ async def preview_plants_csv(file: UploadFile = File(...)) -> Any:
 
 # ── CSV Import ──────────────────────────────────────────────────────────────
 @router.post('/import/csv')
-async def import_plants_csv(file: UploadFile = File(...),
+async def import_plants_csv(background_tasks: BackgroundTasks,
+                            file: UploadFile = File(...),
                             db: AsyncSession = Depends(get_db)) -> Any:
     if not file.filename.endswith('.csv'):
         raise HTTPException(400, 'File must be CSV')
     content = await file.read()
     try:
-        return await process_csv_import(db, content)
+        result = await process_csv_import(db, content)
+        # Describe any taxa the import created
+        background_tasks.add_task(fill_missing_descriptions_in_background)
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -88,6 +93,7 @@ async def check_rows_duplicates(
 # ── JSON Rows Import (from editable preview page) ────────────────────────────
 @router.post('/import/rows')
 async def import_plants_rows(
+    background_tasks: BackgroundTasks,
     rows: List[Dict[str, str]] = Body(...),
     ignore_duplicates: bool = Query(False),
     skip_ai: bool = Query(False),
@@ -106,6 +112,8 @@ async def import_plants_rows(
                     "duplicates": result["duplicates"]
                 }
             )
+        # Describe any taxa the import created
+        background_tasks.add_task(fill_missing_descriptions_in_background)
         return result
     except HTTPException:
         raise

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf,
     ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronsDownUp, X,
+    Sparkles, Loader2,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { plantsApi } from '../../api/plants';
@@ -53,6 +54,11 @@ const rankPlural: Record<Rank, string> = {
     [Rank.GENUS]: 'Genera',
     [Rank.SPECIES]: 'Species',
 };
+
+// What AI-autofilled taxa used to get instead of a description
+const LEGACY_PLACEHOLDER = 'Auto-generated via AI autofill.';
+const hasDescription = (description?: string) =>
+    !!description?.trim() && description.trim() !== LEGACY_PLACEHOLDER;
 
 const nextRank = (rank: Rank): Rank | null => {
     const idx = RANKS.indexOf(rank);
@@ -217,7 +223,43 @@ export const TaxonomyManager = () => {
     const [description, setDescription] = useState('');
     const [openIds, setOpenIds] = useState<string[]>([]);
 
-    const { data: tree, isLoading, error } = useQuery(taxonomyTreeQueryOptions());
+    // Missing descriptions are written by AI in the background; poll while that runs
+    const { data: descriptionStatus } = useQuery({
+        queryKey: ['taxonomy', 'descriptions'],
+        queryFn: taxonomyApi.getDescriptionStatus,
+        refetchInterval: (query) => (query.state.data?.running ? 5000 : false),
+    });
+    const writingDescriptions = !!descriptionStatus?.running;
+
+    const { data: tree, isLoading, error } = useQuery({
+        ...taxonomyTreeQueryOptions(),
+        refetchInterval: writingDescriptions ? 10000 : false,
+    });
+
+    // One last tree refresh once the background run finishes
+    const wasWritingRef = useRef(false);
+    useEffect(() => {
+        if (wasWritingRef.current && !writingDescriptions) {
+            queryClient.invalidateQueries({ queryKey: ['taxonomy', 'tree'] });
+        }
+        wasWritingRef.current = writingDescriptions;
+    }, [writingDescriptions, queryClient]);
+
+    const fillDescriptionsMutation = useMutation({
+        mutationFn: taxonomyApi.fillDescriptions,
+        onSuccess: (status) => {
+            queryClient.setQueryData(['taxonomy', 'descriptions'], status);
+            showAlert(
+                status.missing
+                    ? `Writing ${status.missing} description(s) in the background. This can take a few minutes.`
+                    : 'Every taxon already has a description.',
+                'success',
+            );
+        },
+        onError: (error: any) => {
+            showAlert('Failed to start writing descriptions: ' + (error.response?.data?.detail || error.message), 'error');
+        },
+    });
 
     /* ── Lookups over the full tree ── */
     const index = useMemo(() => {
@@ -389,7 +431,7 @@ export const TaxonomyManager = () => {
         if (!selectedNode) return;
         setNewName(selectedNode.name);
         setNewRank(selectedNode.rank);
-        setDescription(selectedNode.description || '');
+        setDescription(hasDescription(selectedNode.description) ? selectedNode.description!.trim() : '');
         setFormMode('edit');
         setMobileSheet('full');
     };
@@ -510,9 +552,18 @@ export const TaxonomyManager = () => {
                             {node.name}
                         </h2>
                     </div>
-                    {node.description
-                        ? <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{node.description}</p>
-                        : <p className="text-sm text-muted-foreground/60 italic">No description.</p>}
+                    {hasDescription(node.description) ? (
+                        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{node.description}</p>
+                    ) : writingDescriptions ? (
+                        <p className="flex items-center gap-1.5 text-sm text-muted-foreground/70 italic">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Writing description…
+                        </p>
+                    ) : (
+                        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground/60 italic">
+                            No description.
+                            {renderFillButton('link')}
+                        </p>
+                    )}
                 </div>
 
                 {/* Actions */}
@@ -608,12 +659,39 @@ export const TaxonomyManager = () => {
         );
     };
 
+    const renderFillButton = (variant: 'link' | 'outline') => (
+        <Button
+            type="button"
+            variant={variant}
+            size="sm"
+            onClick={() => fillDescriptionsMutation.mutate()}
+            disabled={fillDescriptionsMutation.isPending || writingDescriptions}
+            className={cn(variant === 'link' ? 'h-auto p-0 not-italic' : 'h-8 bg-white')}
+        >
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            Write with AI
+        </Button>
+    );
+
     const renderOverview = () => (
         <div className="flex flex-col gap-5 p-6">
             <div className="flex flex-col items-center text-center text-muted-foreground pt-4">
                 <ListTree className="w-10 h-10 mb-3 opacity-25" />
                 <p className="text-sm">Select a taxon to see its details.</p>
             </div>
+            {!!descriptionStatus?.missing && (
+                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    {writingDescriptions
+                        ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-primary" />
+                        : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
+                    <p className="flex-1 text-xs text-foreground/80">
+                        {writingDescriptions
+                            ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
+                            : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
+                    </p>
+                    {!writingDescriptions && renderFillButton('outline')}
+                </div>
+            )}
             {index.byId.size > 0 && (
                 <div className="space-y-2">
                     <Separator />
