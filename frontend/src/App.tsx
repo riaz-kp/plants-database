@@ -3,6 +3,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { AlertProvider } from './contexts/AlertContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { PwaUpdatePrompt } from './components/common/PwaUpdatePrompt';
 import { queryClient } from './api/queryClient';
 import { router } from './router';
 import './App.css';
@@ -19,6 +20,7 @@ function App() {
         <AlertProvider>
           <ConfirmProvider>
             <InnerApp />
+            <PwaUpdatePrompt />
           </ConfirmProvider>
         </AlertProvider>
       </AuthProvider>
