@@ -1,12 +1,15 @@
-import { useState, useMemo, useEffect, memo, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useDeferredValue, memo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-    Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf
+    Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf,
+    ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronsDownUp, X,
+    Sparkles, Loader2,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { plantsApi } from '../../api/plants';
 
 import { taxonomyApi } from '../../api/taxonomy';
+import { taxonomyTreeQueryOptions } from '../../api/queryOptions';
 import { Rank } from '../../types/taxon';
 import type { TaxonTree } from '../../types/taxon';
 import { useAlert } from '../../contexts/AlertContext';
@@ -16,7 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { cn, cloudinaryThumb } from '@/lib-frontend/utils';
@@ -30,74 +32,136 @@ import {
     SubFiles,
 } from '@/components/animate-ui/components/radix/files';
 
+/* ─── Ranks ─────────────────────────────────────────────── */
+const RANKS = Object.values(Rank);
+
+const rankColor: Record<Rank, string> = {
+    [Rank.KINGDOM]: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    [Rank.DIVISION]: 'bg-blue-50 text-blue-700 border-blue-200',
+    [Rank.CLASS]: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+    [Rank.ORDER]: 'bg-teal-50 text-teal-700 border-teal-200',
+    [Rank.FAMILY]: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    [Rank.GENUS]: 'bg-lime-50 text-lime-800 border-lime-200',
+    [Rank.SPECIES]: 'bg-amber-50 text-amber-700 border-amber-200',
+};
+
+const rankPlural: Record<Rank, string> = {
+    [Rank.KINGDOM]: 'Kingdoms',
+    [Rank.DIVISION]: 'Divisions',
+    [Rank.CLASS]: 'Classes',
+    [Rank.ORDER]: 'Orders',
+    [Rank.FAMILY]: 'Families',
+    [Rank.GENUS]: 'Genera',
+    [Rank.SPECIES]: 'Species',
+};
+
+// What AI-autofilled taxa used to get instead of a description
+const LEGACY_PLACEHOLDER = 'Auto-generated via AI autofill.';
+const hasDescription = (description?: string) =>
+    !!description?.trim() && description.trim() !== LEGACY_PLACEHOLDER;
+
+const nextRank = (rank: Rank): Rank | null => {
+    const idx = RANKS.indexOf(rank);
+    return idx >= 0 && idx < RANKS.length - 1 ? RANKS[idx + 1] : null;
+};
+
+function RankBadge({ rank, full = false, className }: { rank: Rank; full?: boolean; className?: string }) {
+    return (
+        <span
+            title={rank}
+            className={cn(
+                'shrink-0 inline-flex items-center justify-center rounded-md border font-bold uppercase',
+                full ? 'h-6 px-2 text-[10px] tracking-wider' : 'w-5 h-5 text-[10px]',
+                rankColor[rank] ?? 'bg-muted text-muted-foreground border-border',
+                className,
+            )}
+        >
+            {full ? rank : rank[0]}
+        </span>
+    );
+}
+
+/** Renders `text` with the first occurrence of `term` highlighted. */
+function MatchText({ text, term }: { text: string; term?: string }) {
+    const idx = term ? text.toLowerCase().indexOf(term.toLowerCase()) : -1;
+    if (!term || idx < 0) return <>{text}</>;
+    return (
+        <>
+            {text.slice(0, idx)}
+            <mark className="bg-amber-200/70 text-foreground rounded-sm">{text.slice(idx, idx + term.length)}</mark>
+            {text.slice(idx + term.length)}
+        </>
+    );
+}
+
+/* ─── Tree helpers ──────────────────────────────────────── */
+const matchesTerm = (node: TaxonTree, lowerTerm: string) =>
+    node.name.toLowerCase().includes(lowerTerm) || node.rank.toLowerCase().includes(lowerTerm);
+
+/** Keeps matching nodes and the branches leading to them. */
+const filterTree = (nodes: TaxonTree[], lowerTerm: string): TaxonTree[] => {
+    if (!lowerTerm) return nodes;
+    return nodes.reduce((acc: TaxonTree[], node) => {
+        const filteredChildren = filterTree(node.children || [], lowerTerm);
+        if (matchesTerm(node, lowerTerm) || filteredChildren.length > 0) {
+            acc.push({ ...node, children: filteredChildren.length > 0 ? filteredChildren : node.children });
+        }
+        return acc;
+    }, []);
+};
+
+const collectFolderIds = (nodes: TaxonTree[], ids: string[] = []): string[] => {
+    for (const node of nodes) {
+        if (node.children?.length) {
+            ids.push(node.id);
+            collectFolderIds(node.children, ids);
+        }
+    }
+    return ids;
+};
+
 /* ─── Tree Node ─────────────────────────────────────────── */
 interface TreeNodeProps {
     node: TaxonTree;
-    onSelect: (node: TaxonTree) => void;
-    selectedId?: string;
+    onSelect: (id: string) => void;
+    selectedId?: string | null;
     searchTerm?: string;
     open?: string[];
     onOpenChange?: (open: string[]) => void;
 }
 
-const rankColor: Record<string, string> = {
-    KINGDOM: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400',
-    PHYLUM: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400',
-    CLASS: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-400',
-    ORDER: 'bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-400',
-    FAMILY: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400',
-    GENUS: 'bg-lime-100 text-lime-700 dark:bg-lime-950 dark:text-lime-400',
-    SPECIES: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400',
-};
-
 const TreeNode = memo(({ node, onSelect, selectedId, searchTerm, open, onOpenChange }: TreeNodeProps) => {
     const hasChildren = node.children && node.children.length > 0;
     const isSelected = node.id === selectedId;
 
-    const lowerSearch = searchTerm?.toLowerCase() || '';
-    const isMatch =
-        !!searchTerm &&
-        (node.name.toLowerCase().includes(lowerSearch) || node.rank.toLowerCase().includes(lowerSearch));
-
     const content = (
-        <div className="flex items-center gap-2 min-w-0">
-            <span
-                className={cn(
-                    'shrink-0 text-[10px] w-5 h-5 flex items-center justify-center font-bold uppercase tracking-wider rounded-md border border-current opacity-80',
-                    rankColor[node.rank] ?? 'bg-muted text-muted-foreground',
-                )}
-            >
-                {node.rank[0]}
-            </span>
+        <span className="flex items-center gap-2 min-w-0">
+            <RankBadge rank={node.rank} />
             <span className={cn(
-                "text-sm font-medium truncate",
-                isSelected ? "text-primary font-semibold" : "text-foreground/80",
-                isMatch && "text-amber-600 dark:text-amber-400"
+                'text-sm truncate',
+                isSelected ? 'text-primary font-semibold' : 'text-foreground/85 font-medium',
             )}>
-                {node.name}
+                <MatchText text={node.name} term={searchTerm} />
             </span>
-        </div>
+            {hasChildren && (
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{node.children.length}</span>
+            )}
+        </span>
+    );
+
+    const rowClass = cn(
+        'rounded-lg transition-colors px-1 scroll-mt-28',
+        isSelected && 'bg-primary/5 ring-1 ring-primary/25',
     );
 
     if (hasChildren) {
         return (
             <FolderItem value={node.id}>
-                <FolderTrigger 
-                    className={cn(
-                        "rounded-lg transition-colors group px-1",
-                        isSelected && "bg-primary/5 shadow-sm ring-1 ring-primary/20",
-                        isMatch && !isSelected && "bg-amber-50 dark:bg-amber-950/20"
-                    )}
-                    onClick={() => onSelect(node)}
-                >
+                <FolderTrigger className={rowClass} data-taxon-id={node.id} onClick={() => onSelect(node.id)}>
                     {content}
                 </FolderTrigger>
                 <FolderContent>
-                    <SubFiles
-                        className="space-y-0.5"
-                        open={open}
-                        onOpenChange={onOpenChange}
-                    >
+                    <SubFiles className="space-y-0.5" open={open} onOpenChange={onOpenChange}>
                         {node.children.map((child) => (
                             <TreeNode
                                 key={child.id}
@@ -118,18 +182,16 @@ const TreeNode = memo(({ node, onSelect, selectedId, searchTerm, open, onOpenCha
     return (
         <FileItem
             value={node.id}
-            className={cn(
-                "rounded-lg transition-colors group px-1",
-                isSelected && "bg-primary/5 shadow-sm ring-1 ring-primary/20",
-                isMatch && !isSelected && "bg-amber-50 dark:bg-amber-950/20"
-            )}
+            icon={Leaf}
+            className={rowClass}
+            data-taxon-id={node.id}
             role="button"
             tabIndex={0}
-            onClick={() => onSelect(node)}
+            onClick={() => onSelect(node.id)}
             onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    onSelect(node);
+                    onSelect(node.id);
                 }
             }}
         >
@@ -139,43 +201,187 @@ const TreeNode = memo(({ node, onSelect, selectedId, searchTerm, open, onOpenCha
 });
 
 /* ─── TaxonomyManager ────────────────────────────────────── */
+type FormMode = 'create' | 'edit' | null;
+// Phones show the detail panel as a bottom sheet: a one-line peek, or expanded
+type MobileSheet = 'closed' | 'peek' | 'full';
+
 export const TaxonomyManager = () => {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { showAlert } = useAlert();
     const { confirm } = useConfirm();
 
-    const [selectedNode, setSelectedNode] = useState<TaxonTree | null>(null);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isCreating, setIsCreating] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
-    const [panelOpen, setPanelOpen] = useState(false); // mobile detail panel
+    const search = useDeferredValue(searchTerm.trim().toLowerCase());
+    const [formMode, setFormMode] = useState<FormMode>(null);
+    const [createParentId, setCreateParentId] = useState<string | null>(null);
+    const [mobileSheet, setMobileSheet] = useState<MobileSheet>('closed');
 
     const [newName, setNewName] = useState('');
     const [newRank, setNewRank] = useState<Rank>(Rank.KINGDOM);
     const [description, setDescription] = useState('');
     const [openIds, setOpenIds] = useState<string[]>([]);
 
+    // Missing descriptions are written by AI in the background; poll while that runs
+    const { data: descriptionStatus } = useQuery({
+        queryKey: ['taxonomy', 'descriptions'],
+        queryFn: taxonomyApi.getDescriptionStatus,
+        refetchInterval: (query) => (query.state.data?.running ? 5000 : false),
+    });
+    const writingDescriptions = !!descriptionStatus?.running;
+
     const { data: tree, isLoading, error } = useQuery({
-        queryKey: ['taxonomy', 'tree'],
-        queryFn: () => taxonomyApi.getTree(),
+        ...taxonomyTreeQueryOptions(),
+        refetchInterval: writingDescriptions ? 10000 : false,
     });
 
+    // One last tree refresh once the background run finishes
+    const wasWritingRef = useRef(false);
+    useEffect(() => {
+        if (wasWritingRef.current && !writingDescriptions) {
+            queryClient.invalidateQueries({ queryKey: ['taxonomy', 'tree'] });
+        }
+        wasWritingRef.current = writingDescriptions;
+    }, [writingDescriptions, queryClient]);
+
+    const fillDescriptionsMutation = useMutation({
+        mutationFn: taxonomyApi.fillDescriptions,
+        onSuccess: (status) => {
+            queryClient.setQueryData(['taxonomy', 'descriptions'], status);
+            showAlert(
+                status.missing
+                    ? `Writing ${status.missing} description(s) in the background. This can take a few minutes.`
+                    : 'Every taxon already has a description.',
+                'success',
+            );
+        },
+        onError: (error: any) => {
+            showAlert('Failed to start writing descriptions: ' + (error.response?.data?.detail || error.message), 'error');
+        },
+    });
+
+    /* ── Lookups over the full tree ── */
+    const index = useMemo(() => {
+        const byId = new Map<string, TaxonTree>();
+        const parentOf = new Map<string, string>();
+        const rankCounts = new Map<Rank, number>();
+        const walk = (nodes: TaxonTree[], parentId?: string) => {
+            for (const node of nodes) {
+                byId.set(node.id, node);
+                if (parentId) parentOf.set(node.id, parentId);
+                rankCounts.set(node.rank, (rankCounts.get(node.rank) ?? 0) + 1);
+                if (node.children?.length) walk(node.children, node.id);
+            }
+        };
+        walk(tree ?? []);
+        return { byId, parentOf, rankCounts, folderIds: collectFolderIds(tree ?? []) };
+    }, [tree]);
+
+    const ancestorsOf = useCallback((id: string): TaxonTree[] => {
+        const path: TaxonTree[] = [];
+        let parentId = index.parentOf.get(id);
+        while (parentId) {
+            const parent = index.byId.get(parentId);
+            if (!parent) break;
+            path.unshift(parent);
+            parentId = index.parentOf.get(parentId);
+        }
+        return path;
+    }, [index]);
+
+    // Derived from the latest tree, so edits and new children show up without reselecting
+    const selectedNode = selectedId ? index.byId.get(selectedId) ?? null : null;
+    const createParent = createParentId ? index.byId.get(createParentId) ?? null : null;
     const isSpecies = selectedNode?.rank === Rank.SPECIES;
+
     const { data: associatedPlants } = useQuery({
-        queryKey: ['plants', 'by-taxon', selectedNode?.id],
-        queryFn: () => plantsApi.getAll({ taxon_id: selectedNode?.id }),
-        enabled: !!selectedNode && isSpecies,
+        queryKey: ['plants', 'by-taxon', selectedId],
+        queryFn: () => plantsApi.getAll({ taxon_id: selectedId! }),
+        enabled: !!selectedId && isSpecies,
     });
 
+    const filteredTree = useMemo(() => filterTree(tree ?? [], search), [tree, search]);
+    const matchCount = useMemo(() => {
+        if (!search) return 0;
+        let count = 0;
+        index.byId.forEach(node => { if (matchesTerm(node, search)) count++; });
+        return count;
+    }, [index, search]);
+
+    /* ── Expansion ── */
+    const rootFolderIds = useMemo(() => (tree ?? []).filter(n => n.children?.length).map(n => n.id), [tree]);
+
+    // Start with the top level open, so the tree isn't a single collapsed row
+    const initializedRef = useRef(false);
+    useEffect(() => {
+        if (!tree || initializedRef.current) return;
+        initializedRef.current = true;
+        setOpenIds(rootFolderIds);
+    }, [tree, rootFolderIds]);
+
+    // Searching opens every matching branch; clearing the search goes back to the selection's branch.
+    // Only reacts to the search changing, so a refetch after an edit keeps the current expansion.
+    const lastSearchRef = useRef('');
+    useEffect(() => {
+        if (search === lastSearchRef.current) return;
+        lastSearchRef.current = search;
+        if (search) {
+            setOpenIds(collectFolderIds(filteredTree));
+        } else {
+            const branch = selectedId ? ancestorsOf(selectedId).map(n => n.id) : [];
+            setOpenIds(Array.from(new Set([...rootFolderIds, ...branch])));
+        }
+    }, [search, filteredTree, selectedId, ancestorsOf, rootFolderIds]);
+
+    const expandAll = () => setOpenIds(search ? collectFolderIds(filteredTree) : index.folderIds);
+    const collapseAll = () => setOpenIds([]);
+
+    /** Opens the branch down to a node and scrolls it into view in the tree. */
+    const revealInTree = useCallback((id: string) => {
+        const branch = ancestorsOf(id).map(n => n.id);
+        setOpenIds(prev => Array.from(new Set([...prev, ...branch])));
+        // After the folders' open animation
+        window.setTimeout(() => {
+            document.querySelector(`[data-taxon-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 350);
+    }, [ancestorsOf]);
+
+    /* ── Selection ── */
+    const handleTreeSelect = useCallback((id: string) => {
+        setSelectedId(id);
+        setFormMode(null);
+        setMobileSheet(s => (s === 'full' ? 'full' : 'peek'));
+    }, []);
+
+    /** Selecting from the detail panel (breadcrumb, child list) also reveals the node in the tree. */
+    const selectFromPanel = (id: string) => {
+        setSelectedId(id);
+        setFormMode(null);
+        revealInTree(id);
+    };
+
+    const clearSelection = () => {
+        setSelectedId(null);
+        setFormMode(null);
+        setMobileSheet('closed');
+    };
+
+    /* ── Mutations ── */
     const createMutation = useMutation({
         mutationFn: taxonomyApi.create,
-        onSuccess: () => {
+        onSuccess: (_created, variables) => {
             queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-            showAlert('Taxon created successfully', 'success');
-            setIsCreating(false);
+            showAlert(`${variables.rank} "${variables.name}" created`, 'success');
+            setFormMode(null);
             setNewName('');
             setDescription('');
+            // Keep the parent selected and open, so the new child is visible under it
+            if (variables.parent_id) {
+                setOpenIds(prev => prev.includes(variables.parent_id!) ? prev : [...prev, variables.parent_id!]);
+            } else if (!selectedId) {
+                setMobileSheet('closed');
+            }
         },
         onError: (error: any) => {
             showAlert('Failed to create taxon: ' + (error.response?.data?.detail || error.message), 'error');
@@ -183,12 +389,11 @@ export const TaxonomyManager = () => {
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => taxonomyApi.update(id, data),
+        mutationFn: ({ id, data }: { id: string; data: { name: string; description: string } }) => taxonomyApi.update(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-            showAlert('Taxon updated successfully', 'success');
-            setIsEditing(false);
-            if (selectedNode) setSelectedNode({ ...selectedNode, name: newName, description });
+            showAlert('Taxon updated', 'success');
+            setFormMode(null);
         },
         onError: (error: any) => {
             showAlert('Failed to update taxon: ' + (error.response?.data?.detail || error.message), 'error');
@@ -197,273 +402,322 @@ export const TaxonomyManager = () => {
 
     const deleteMutation = useMutation({
         mutationFn: taxonomyApi.delete,
-        onSuccess: () => {
+        onSuccess: (_data, deletedId) => {
             queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-            showAlert('Taxon deleted successfully', 'success');
-            setSelectedNode(null);
-            setPanelOpen(false);
+            showAlert('Taxon deleted', 'success');
+            // Move up to the parent, if there is one
+            const parentId = index.parentOf.get(deletedId) ?? null;
+            setSelectedId(parentId);
+            if (!parentId) setMobileSheet('closed');
         },
         onError: (error: any) => {
             showAlert('Failed to delete taxon: ' + (error.response?.data?.detail || error.message), 'error');
         },
     });
 
-    const getNextRank = useCallback((rank: Rank): Rank | null => {
-        const ranks = Object.values(Rank);
-        const idx = ranks.indexOf(rank);
-        return idx >= 0 && idx < ranks.length - 1 ? ranks[idx + 1] : null;
-    }, []);
-
-    const startCreateChild = useCallback(() => {
-        if (selectedNode) {
-            const next = getNextRank(selectedNode.rank);
-            if (!next) { showAlert('Cannot create child of Species', 'warning'); return; }
-            setNewRank(next);
-        } else {
-            setNewRank(Rank.KINGDOM);
-        }
+    /* ── Form ── */
+    const startCreate = (parent: TaxonTree | null) => {
+        const rank = parent ? nextRank(parent.rank) : Rank.KINGDOM;
+        if (!rank) { showAlert('Species cannot have child taxa', 'warning'); return; }
+        setCreateParentId(parent?.id ?? null);
+        setNewRank(rank);
         setNewName('');
         setDescription('');
-        setIsCreating(true);
-        setIsEditing(false);
-    }, [selectedNode, getNextRank, showAlert]);
+        setFormMode('create');
+        setMobileSheet('full');
+    };
 
-    const startEdit = useCallback(() => {
+    const startEdit = () => {
         if (!selectedNode) return;
         setNewName(selectedNode.name);
         setNewRank(selectedNode.rank);
-        setDescription(selectedNode.description || '');
-        setIsEditing(true);
-        setIsCreating(false);
-    }, [selectedNode]);
+        setDescription(hasDescription(selectedNode.description) ? selectedNode.description!.trim() : '');
+        setFormMode('edit');
+        setMobileSheet('full');
+    };
 
-    const handleDelete = useCallback(() => {
+    const cancelForm = () => {
+        setFormMode(null);
+        if (!selectedId) setMobileSheet('closed');
+    };
+
+    const handleDelete = () => {
         if (!selectedNode) return;
         if (selectedNode.children?.length) {
-            showAlert('Cannot delete a taxon that has children.', 'warning');
+            showAlert('Remove its child taxa first.', 'warning');
             return;
         }
         confirm({
-            title: 'Delete Taxon',
-            message: 'Are you sure you want to delete this taxon?',
+            title: `Delete ${selectedNode.rank}`,
+            message: `Delete "${selectedNode.name}"? This cannot be undone.`,
             confirmText: 'Delete',
             onConfirm: () => deleteMutation.mutate(selectedNode.id),
         });
-    }, [selectedNode, confirm, deleteMutation, showAlert]);
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (isEditing && selectedNode) {
-            updateMutation.mutate({ id: selectedNode.id, data: { name: newName, description } });
+        const name = newName.trim();
+        if (!name) return;
+        if (formMode === 'edit' && selectedNode) {
+            updateMutation.mutate({ id: selectedNode.id, data: { name, description } });
         } else {
-            createMutation.mutate({
-                name: newName,
-                rank: newRank,
-                description,
-                parent_id: selectedNode?.id,
-            });
+            createMutation.mutate({ name, rank: newRank, description, parent_id: createParent?.id });
         }
     };
 
-    const handleNodeSelect = useCallback((node: TaxonTree) => {
-        setSelectedNode(node);
-        setIsEditing(false);
-        setIsCreating(false);
-        setPanelOpen(true);
-    }, []);
+    const isSaving = createMutation.isPending || updateMutation.isPending;
 
-    const filterTree = (nodes: TaxonTree[], term: string): TaxonTree[] => {
-        if (!term) return nodes;
-        const lowerTerm = term.toLowerCase();
-        return nodes.reduce((acc: TaxonTree[], node) => {
-            const matchesSelf =
-                node.name.toLowerCase().includes(lowerTerm) ||
-                node.rank.toLowerCase().includes(lowerTerm);
+    /* ── Detail panel pieces ── */
+    const renderBreadcrumb = (nodes: TaxonTree[]) => nodes.length > 0 && (
+        <nav aria-label="Classification" className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+            {nodes.map((n, i) => (
+                <span key={n.id} className="inline-flex items-center gap-1 min-w-0">
+                    {i > 0 && <ChevronRight className="w-3 h-3 shrink-0 opacity-50" />}
+                    <button
+                        type="button"
+                        onClick={() => selectFromPanel(n.id)}
+                        className="truncate max-w-[160px] hover:text-primary hover:underline underline-offset-2"
+                        title={`${n.rank}: ${n.name}`}
+                    >
+                        {n.name}
+                    </button>
+                </span>
+            ))}
+        </nav>
+    );
 
-            const filteredChildren = filterTree(node.children || [], term);
-            const hasMatchingChildren = filteredChildren.length > 0;
-
-            if (matchesSelf || hasMatchingChildren) {
-                acc.push({
-                    ...node,
-                    children: hasMatchingChildren ? filteredChildren : node.children
-                });
-            }
-            return acc;
-        }, []);
-    };
-
-    const filteredTree = useMemo(() => {
-        if (!tree) return [];
-        return filterTree(tree, searchTerm);
-    }, [tree, searchTerm]);
-
-    // Auto-expand tree on search
-    useEffect(() => {
-        if (searchTerm) {
-            const ids: string[] = [];
-            const collectIds = (nodes: TaxonTree[]) => {
-                nodes.forEach(node => {
-                    if (node.children?.length) {
-                        ids.push(node.id);
-                        collectIds(node.children);
-                    }
-                });
-            };
-            collectIds(filteredTree);
-            setOpenIds(ids);
-        } else {
-            setOpenIds([]);
-        }
-    }, [searchTerm, filteredTree]);
-
-    /* ── Panels ── */
-    const DetailPanel = () => (
-        <div className="flex flex-col h-full">
-            {(isCreating || isEditing) ? (
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-4 overflow-y-auto">
-                    <div>
+    const renderForm = () => {
+        const parentPath = createParent ? [...ancestorsOf(createParent.id), createParent] : [];
+        return (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
+                <div className="space-y-2">
+                    {formMode === 'create' ? renderBreadcrumb(parentPath)
+                        : selectedNode && renderBreadcrumb(ancestorsOf(selectedNode.id))}
+                    <div className="flex items-center gap-2">
+                        <RankBadge rank={newRank} full />
                         <h3 className="font-semibold text-foreground">
-                            {isEditing ? `Edit ${selectedNode?.rank}` : `Add New ${newRank}`}
+                            {formMode === 'edit' ? `Edit ${newRank.toLowerCase()}` : `New ${newRank.toLowerCase()}`}
                         </h3>
-                        {isCreating && selectedNode && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                                Parent: <strong>{selectedNode.name}</strong> ({selectedNode.rank})
-                            </p>
-                        )}
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <Label htmlFor="tax-name">Name <span className="text-destructive">*</span></Label>
-                        <Input
-                            id="tax-name"
-                            value={newName}
-                            onChange={(e) => setNewName(e.target.value)}
-                            required
-                            autoFocus
-                            placeholder={`Enter ${newRank.toLowerCase()} name`}
-                        />
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <Label>Rank</Label>
-                        <Input value={newRank} disabled className="bg-muted text-muted-foreground" />
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <Label htmlFor="tax-desc">Description</Label>
-                        <Textarea
-                            id="tax-desc"
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            rows={3}
-                            className="resize-none"
-                            placeholder="Optional notes..."
-                        />
-                    </div>
-
-                    <div className="flex gap-2 mt-2">
-                        <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending || !newName.trim()}>
-                            {createMutation.isPending || updateMutation.isPending ? 'Saving…' : 'Save'}
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => { setIsCreating(false); setIsEditing(false); }}
-                        >
-                            Cancel
-                        </Button>
-                    </div>
-                </form>
-            ) : selectedNode ? (
-                <div className="flex flex-col gap-4 p-4 overflow-y-auto">
-                    <div className="flex items-start gap-3">
-                        <div
-                            className={cn(
-                                'shrink-0 text-xs font-bold uppercase tracking-wider px-2 py-1 rounded mt-0.5',
-                                rankColor[selectedNode.rank] ?? 'bg-muted text-muted-foreground',
-                            )}
-                        >
-                            {selectedNode.rank}
-                        </div>
-                        <h2 className="text-xl font-semibold text-foreground leading-tight">{selectedNode.name}</h2>
-                    </div>
-
-                    {selectedNode.description && (
-                        <p className="text-sm text-muted-foreground leading-relaxed">{selectedNode.description}</p>
-                    )}
-
-                    {selectedNode.children?.length > 0 && (
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Children:</span>
-                            <Badge variant="secondary">{selectedNode.children.length}</Badge>
-                        </div>
-                    )}
-
-                    {isSpecies && associatedPlants && associatedPlants.items.length > 0 && (
-                        <div className="mt-2 space-y-3">
-                            <Separator />
-                            <div>
-                                <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Linked Plant</h4>
-                                {associatedPlants.items.slice(0, 1).map(plant => (
-                                    <div key={plant.id} className="flex gap-4 items-center bg-muted/30 p-3 rounded-xl border border-border/50 shadow-sm transition-all hover:bg-muted/50 group">
-                                        {plant.icon_url ? (
-                                            <img src={cloudinaryThumb(plant.icon_url, 48)} alt={plant.common_name} className="w-12 h-12 rounded-lg object-cover bg-muted ring-1 ring-border/50" />
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-muted-foreground/40 ring-1 ring-border/50">
-                                                <Leaf size={20} opacity={0.5} />
-                                            </div>
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold truncate text-foreground mb-0.5 group-hover:text-primary transition-colors">{plant.common_name}</p>
-                                            {plant.scientific_name && (
-                                                <p className="text-[10px] italic text-muted-foreground mb-1.5 truncate">{plant.scientific_name}</p>
-                                            )}
-                                            <Button
-                                                variant="link"
-                                                size="sm"
-                                                className="h-auto p-0 text-[11px] text-primary gap-1 font-semibold opacity-80 hover:opacity-100"
-                                                onClick={() => navigate({ to: `/plants/${plant.id}` as any })}
-                                            >
-                                                View Plant Detail <ExternalLink size={10} />
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <Separator />
-
-                    <div className="flex flex-col gap-2">
-                        {getNextRank(selectedNode.rank) && (
-                            <Button size="sm" onClick={startCreateChild} className="w-full">
-                                <Plus className="w-3.5 h-3.5 mr-2" />
-                                Add {getNextRank(selectedNode.rank)}
-                            </Button>
-                        )}
-                        <Button size="sm" variant="outline" onClick={startEdit} className="w-full">
-                            <Pencil className="w-3.5 h-3.5 mr-2" />
-                            Edit
-                        </Button>
-                        <Button size="sm" variant="destructive" onClick={handleDelete} className="w-full">
-                            <Trash2 className="w-3.5 h-3.5 mr-2" />
-                            Delete
-                        </Button>
                     </div>
                 </div>
-            ) : (
-                <div className="flex flex-col items-center justify-center h-full p-6 text-center text-muted-foreground">
-                    <ListTree className="w-10 h-10 mb-3 opacity-25" />
-                    <p className="text-sm">Select a taxon to view details, or create a new Kingdom.</p>
+
+                <div className="space-y-1.5">
+                    <Label htmlFor="tax-name">Name <span className="text-destructive">*</span></Label>
+                    <Input
+                        id="tax-name"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        required
+                        autoFocus
+                        placeholder={`${newRank} name`}
+                    />
+                </div>
+
+                <div className="space-y-1.5">
+                    <Label htmlFor="tax-desc">Description</Label>
+                    <Textarea
+                        id="tax-desc"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        rows={4}
+                        className="resize-none"
+                        placeholder="Optional notes…"
+                    />
+                </div>
+
+                <div className="flex gap-2">
+                    <Button type="submit" disabled={isSaving || !newName.trim()} className="flex-1 sm:flex-none">
+                        {isSaving ? 'Saving…' : formMode === 'edit' ? 'Save changes' : `Add ${newRank.toLowerCase()}`}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={cancelForm} disabled={isSaving}>
+                        Cancel
+                    </Button>
+                </div>
+            </form>
+        );
+    };
+
+    const renderDetails = (node: TaxonTree) => {
+        const childRank = nextRank(node.rank);
+        const children = node.children ?? [];
+        const hasChildren = children.length > 0;
+        return (
+            <div className="flex flex-col gap-4 p-5">
+                <div className="space-y-2">
+                    {renderBreadcrumb(ancestorsOf(node.id))}
+                    <div className="flex items-start gap-2.5">
+                        <RankBadge rank={node.rank} full className="mt-1" />
+                        <h2 className={cn('text-xl font-semibold text-foreground leading-tight break-words', isSpecies && 'italic')}>
+                            {node.name}
+                        </h2>
+                    </div>
+                    {hasDescription(node.description) ? (
+                        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{node.description}</p>
+                    ) : writingDescriptions ? (
+                        <p className="flex items-center gap-1.5 text-sm text-muted-foreground/70 italic">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Writing description…
+                        </p>
+                    ) : (
+                        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground/60 italic">
+                            No description.
+                            {renderFillButton('link')}
+                        </p>
+                    )}
+                </div>
+
+                {/* Actions */}
+                <div className="grid grid-cols-2 gap-2">
+                    {childRank && (
+                        <Button size="sm" onClick={() => startCreate(node)} className="col-span-2">
+                            <Plus className="w-3.5 h-3.5 mr-1.5" />
+                            Add {childRank.toLowerCase()}
+                        </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={startEdit}>
+                        <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                        Edit
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDelete}
+                        disabled={hasChildren || deleteMutation.isPending}
+                        title={hasChildren ? 'Remove its child taxa first' : `Delete this ${node.rank.toLowerCase()}`}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
+                    >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Delete
+                    </Button>
+                </div>
+
+                {/* Children */}
+                {childRank && (
+                    <div className="space-y-2">
+                        <Separator />
+                        <h4 className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground pt-1">
+                            {rankPlural[childRank]}
+                            <span className="tabular-nums">{children.length}</span>
+                        </h4>
+                        {hasChildren ? (
+                            <ul className="max-h-72 overflow-y-auto -mx-1 space-y-0.5">
+                                {children.map(child => (
+                                    <li key={child.id}>
+                                        <button
+                                            type="button"
+                                            onClick={() => selectFromPanel(child.id)}
+                                            className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left hover:bg-muted/60 transition-colors"
+                                        >
+                                            <span className={cn('text-sm text-foreground truncate', child.rank === Rank.SPECIES && 'italic')}>{child.name}</span>
+                                            {child.children?.length > 0 && (
+                                                <span className="text-[11px] tabular-nums text-muted-foreground/70">{child.children.length}</span>
+                                            )}
+                                            <ChevronRight className="ml-auto w-3.5 h-3.5 shrink-0 text-muted-foreground/40 group-hover:text-primary" />
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">No {rankPlural[childRank].toLowerCase()} yet.</p>
+                        )}
+                    </div>
+                )}
+
+                {/* Plants linked to a species */}
+                {isSpecies && associatedPlants && associatedPlants.items.length > 0 && (
+                    <div className="space-y-2">
+                        <Separator />
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground pt-1">
+                            Linked {associatedPlants.items.length === 1 ? 'plant' : 'plants'}
+                        </h4>
+                        {associatedPlants.items.map(plant => (
+                            <button
+                                key={plant.id}
+                                type="button"
+                                onClick={() => navigate({ to: '/plants/$id', params: { id: plant.id } })}
+                                className="group w-full flex gap-3 items-center bg-muted/30 p-2.5 rounded-xl border border-border/50 text-left transition-colors hover:bg-muted/60"
+                            >
+                                {plant.icon_url ? (
+                                    <img src={cloudinaryThumb(plant.icon_url, 48)} alt="" className="w-11 h-11 rounded-lg object-cover bg-muted ring-1 ring-border/50" />
+                                ) : (
+                                    <div className="w-11 h-11 rounded-lg bg-muted flex items-center justify-center text-muted-foreground/40 ring-1 ring-border/50">
+                                        <Leaf size={18} />
+                                    </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors">{plant.common_name}</p>
+                                    {plant.scientific_name && (
+                                        <p className="text-xs italic text-muted-foreground truncate">{plant.scientific_name}</p>
+                                    )}
+                                </div>
+                                <ExternalLink className="w-3.5 h-3.5 shrink-0 text-muted-foreground/50 group-hover:text-primary" />
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderFillButton = (variant: 'link' | 'outline') => (
+        <Button
+            type="button"
+            variant={variant}
+            size="sm"
+            onClick={() => fillDescriptionsMutation.mutate()}
+            disabled={fillDescriptionsMutation.isPending || writingDescriptions}
+            className={cn(variant === 'link' ? 'h-auto p-0 not-italic' : 'h-8 bg-white')}
+        >
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            Write with AI
+        </Button>
+    );
+
+    const renderOverview = () => (
+        <div className="flex flex-col gap-5 p-6">
+            <div className="flex flex-col items-center text-center text-muted-foreground pt-4">
+                <ListTree className="w-10 h-10 mb-3 opacity-25" />
+                <p className="text-sm">Select a taxon to see its details.</p>
+            </div>
+            {!!descriptionStatus?.missing && (
+                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    {writingDescriptions
+                        ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-primary" />
+                        : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
+                    <p className="flex-1 text-xs text-foreground/80">
+                        {writingDescriptions
+                            ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
+                            : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
+                    </p>
+                    {!writingDescriptions && renderFillButton('outline')}
+                </div>
+            )}
+            {index.byId.size > 0 && (
+                <div className="space-y-2">
+                    <Separator />
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground pt-1">Overview</h4>
+                    <ul className="space-y-1">
+                        {RANKS.map(rank => (
+                            <li key={rank} className="flex items-center gap-2 text-sm">
+                                <RankBadge rank={rank} />
+                                <span className="text-foreground/85">{rankPlural[rank]}</span>
+                                <span className="ml-auto tabular-nums text-muted-foreground">{index.rankCounts.get(rank) ?? 0}</span>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
             )}
         </div>
     );
 
+    // Title on the phone sheet's handle row
+    const sheetTitle = formMode === 'create' ? `New ${newRank.toLowerCase()}`
+        : formMode === 'edit' ? `Edit ${newRank.toLowerCase()}`
+        : selectedNode?.name ?? '';
+    const sheetRank = formMode ? newRank : selectedNode?.rank;
+
     return (
-        <div>
+        <div className={cn(mobileSheet !== 'closed' && 'pb-20 lg:pb-0')}>
             {/* Page Header */}
             <div className="flex flex-col gap-1 mb-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -472,10 +726,7 @@ export const TaxonomyManager = () => {
                         Manage the hierarchical classification of plants.
                     </p>
                 </div>
-                <Button
-                    onClick={() => { setSelectedNode(null); startCreateChild(); }}
-                    className="mt-3 sm:mt-0 w-full sm:w-auto"
-                >
+                <Button onClick={() => startCreate(null)} className="mt-3 sm:mt-0 w-full sm:w-auto">
                     <Plus className="w-4 h-4 mr-2" />
                     Add Kingdom
                 </Button>
@@ -485,57 +736,91 @@ export const TaxonomyManager = () => {
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
                 {/* Tree Panel */}
                 <div className="lg:col-span-3 rounded-xl border border-border bg-white shadow-sm flex flex-col">
-                    {/* Search */}
-                    <div className="p-4 border-b border-border sticky top-0 bg-white/95 backdrop-blur-md z-30 rounded-t-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)]">
+                    {/* Search + expand controls */}
+                    <div className="px-4 pt-4 pb-2 border-b border-border sticky top-0 bg-white/95 backdrop-blur-md z-30 rounded-t-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)]">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                             <Input
                                 type="text"
-                                placeholder="Search taxonomy…"
+                                placeholder="Search by name or rank…"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Escape') setSearchTerm(''); }}
                                 className="pl-9 pr-8"
                             />
                             {searchTerm && (
                                 <button
+                                    type="button"
                                     onClick={() => setSearchTerm('')}
+                                    aria-label="Clear search"
                                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground"
                                 >
                                     <XCircle size={14} />
                                 </button>
                             )}
                         </div>
+                        <div className="flex items-center justify-between gap-2 mt-2">
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                                {search
+                                    ? `${matchCount} ${matchCount === 1 ? 'match' : 'matches'}`
+                                    : `${index.byId.size} taxa`}
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                    onClick={expandAll}
+                                    disabled={filteredTree.length === 0}
+                                >
+                                    <ChevronsUpDown className="w-3.5 h-3.5 mr-1" />
+                                    Expand all
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                    onClick={collapseAll}
+                                    disabled={openIds.length === 0}
+                                >
+                                    <ChevronsDownUp className="w-3.5 h-3.5 mr-1" />
+                                    Collapse all
+                                </Button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Tree */}
-                    <div className="flex-1 p-3 space-y-0.5">
+                    <div className="flex-1 p-2 sm:p-3">
                         {isLoading ? (
                             Array.from({ length: 6 }).map((_, i) => (
                                 <div key={i} className="flex items-center gap-2 px-3 py-2">
                                     <Skeleton className="h-4 w-4 rounded" />
-                                    <Skeleton className="h-4 w-16 rounded" />
+                                    <Skeleton className="h-4 w-5 rounded" />
                                     <Skeleton className="h-4 w-32 rounded" />
                                 </div>
                             ))
                         ) : error ? (
                             <p className="text-sm text-destructive px-3 py-2">Error loading taxonomy tree.</p>
                         ) : filteredTree.length === 0 ? (
-                            <p className="text-sm text-muted-foreground px-3 py-6 text-center">
-                                {searchTerm ? 'No results found.' : 'No taxonomy data yet.'}
-                            </p>
+                            <div className="flex flex-col items-center text-center px-3 py-10 text-muted-foreground">
+                                <Search className="w-8 h-8 mb-2 opacity-20" />
+                                <p className="text-sm">
+                                    {searchTerm ? <>No taxa match “{searchTerm.trim()}”.</> : 'No taxonomy data yet.'}
+                                </p>
+                                {searchTerm && (
+                                    <Button variant="link" size="sm" onClick={() => setSearchTerm('')}>Clear search</Button>
+                                )}
+                            </div>
                         ) : (
-                            <Files
-                                className="w-full"
-                                open={openIds}
-                                onOpenChange={setOpenIds}
-                            >
+                            <Files className="w-full p-0" open={openIds} onOpenChange={setOpenIds}>
                                 {filteredTree.map((node) => (
                                     <TreeNode
                                         key={node.id}
                                         node={node}
-                                        onSelect={handleNodeSelect}
-                                        selectedId={selectedNode?.id}
-                                        searchTerm={searchTerm}
+                                        onSelect={handleTreeSelect}
+                                        selectedId={selectedId}
+                                        searchTerm={search}
                                         open={openIds}
                                         onOpenChange={setOpenIds}
                                     />
@@ -543,30 +828,49 @@ export const TaxonomyManager = () => {
                             </Files>
                         )}
                     </div>
+
+                    {/* Rank legend */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3 border-t border-border bg-muted/20 rounded-b-xl">
+                        {RANKS.map(rank => (
+                            <span key={rank} className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <RankBadge rank={rank} /> {rank}
+                            </span>
+                        ))}
+                    </div>
                 </div>
 
-                {/* Detail Panel — hidden on mobile unless a node is selected */}
-                <div
+                {/* Detail panel — a sticky side panel on desktop, a bottom sheet on phones */}
+                <aside
                     className={cn(
-                        'lg:col-span-2 sticky top-0 rounded-xl border border-border bg-white shadow-sm overflow-hidden flex flex-col h-fit max-h-[calc(100vh-20px)] z-20',
-                        !panelOpen && !isCreating && 'hidden lg:flex',
-                        (panelOpen || isCreating) && 'flex',
+                        'flex flex-col bg-white border border-border overflow-hidden',
+                        'fixed inset-x-0 bottom-0 z-40 max-h-[80vh] rounded-t-2xl shadow-[0_-10px_30px_-12px_rgba(0,0,0,0.3)]',
+                        mobileSheet === 'closed' && 'hidden',
+                        'lg:flex lg:sticky lg:inset-auto lg:top-0 lg:z-20 lg:col-span-2 lg:max-h-[calc(100vh-5rem)] lg:rounded-xl lg:shadow-sm',
                     )}
                 >
-                    {(panelOpen || isCreating || selectedNode) && !!(selectedNode || isCreating) && (
-                        <div className="lg:hidden flex items-center gap-2 px-4 py-3 border-b border-border">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => { setPanelOpen(false); setSelectedNode(null); setIsCreating(false); setIsEditing(false); }}
-                            >
-                                ← Back to Tree
-                            </Button>
-                        </div>
-                    )}
-                    <DetailPanel />
-                </div>
+                    {/* Phone handle row: tap to expand / shrink */}
+                    <div className="lg:hidden flex items-center gap-2 pl-4 pr-2 py-2.5 border-b border-border">
+                        <button
+                            type="button"
+                            onClick={() => setMobileSheet(s => (s === 'full' ? 'peek' : 'full'))}
+                            className="flex flex-1 items-center gap-2 min-w-0 text-left"
+                            aria-expanded={mobileSheet === 'full'}
+                        >
+                            {sheetRank && <RankBadge rank={sheetRank} />}
+                            <span className="font-semibold text-sm text-foreground truncate">{sheetTitle}</span>
+                            {mobileSheet === 'full'
+                                ? <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" />
+                                : <ChevronUp className="w-4 h-4 shrink-0 text-muted-foreground" />}
+                        </button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={clearSelection} aria-label="Close">
+                            <X className="w-4 h-4" />
+                        </Button>
+                    </div>
+
+                    <div className={cn('flex-1 overflow-y-auto', mobileSheet !== 'full' && 'hidden lg:block')}>
+                        {formMode ? renderForm() : selectedNode ? renderDetails(selectedNode) : renderOverview()}
+                    </div>
+                </aside>
             </div>
         </div>
     );

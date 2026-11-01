@@ -1,12 +1,18 @@
+import ssl
+import certifi
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
-# Check if we are using Neon (usually has neon.tech in host)
+# Check if we are using Neon or SSL connection
 connect_args = {}
-if "neon.tech" in str(settings.SQLALCHEMY_DATABASE_URI):
-    connect_args["ssl"] = True
+if "neon.tech" in str(settings.SQLALCHEMY_DATABASE_URI) or "sslmode" in str(settings.SQLALCHEMY_DATABASE_URI):
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    connect_args["ssl"] = ssl_context
+elif "neon.tech" in str(settings.SQLALCHEMY_DATABASE_URI):
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    connect_args["ssl"] = ssl_context
 
 engine = create_async_engine(
     str(settings.SQLALCHEMY_DATABASE_URI),

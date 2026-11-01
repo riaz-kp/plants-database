@@ -1,7 +1,7 @@
 from typing import Any, List
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -9,6 +9,11 @@ from app.db.session import get_db
 from app.models.taxon import Taxon
 from app.schemas.taxon import TaxonResponse, TaxonCreate, TaxonUpdate, TaxonTree, TaxonEnsurePathRequest
 from sqlalchemy import func
+from app.services.taxon_description_service import (
+    count_missing_descriptions,
+    fill_missing_descriptions_in_background,
+    fill_running,
+)
 
 router = APIRouter()
 
@@ -75,17 +80,19 @@ async def create_taxon(
 async def ensure_taxonomy_path(
     *,
     db: AsyncSession = Depends(get_db),
-    request: TaxonEnsurePathRequest
+    request: TaxonEnsurePathRequest,
+    background_tasks: BackgroundTasks,
 ) -> Any:
     """
     Ensure a full taxonomy path exists, creating any missing nodes.
-    Returns the leaf node.
+    Returns the leaf node. New nodes get their descriptions written in the background.
     """
     if not request.path:
         raise HTTPException(status_code=400, detail="Path cannot be empty")
         
     current_parent_id = None
     last_taxon = None
+    created_any = False
     
     for item in request.path:
         # Check if it exists at this level with this parent
@@ -107,16 +114,36 @@ async def ensure_taxonomy_path(
                 name=item.name,
                 rank=item.rank,
                 parent_id=current_parent_id,
-                description=f"Auto-generated via AI autofill."
             )
             db.add(taxon)
             await db.commit()
             await db.refresh(taxon)
+            created_any = True
             
         current_parent_id = taxon.id
         last_taxon = taxon
-        
+
+    if created_any:
+        background_tasks.add_task(fill_missing_descriptions_in_background)
     return last_taxon
+
+
+@router.get("/descriptions/status")
+async def taxon_descriptions_status(db: AsyncSession = Depends(get_db)) -> Any:
+    """How many taxa still lack a description, and whether they're being written now."""
+    return {"missing": await count_missing_descriptions(db), "running": fill_running()}
+
+
+@router.post("/descriptions/fill")
+async def fill_taxon_descriptions(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Write AI descriptions for every taxon without one, in the background."""
+    missing = await count_missing_descriptions(db)
+    if missing:
+        background_tasks.add_task(fill_missing_descriptions_in_background)
+    return {"missing": missing, "running": missing > 0 or fill_running()}
 
 @router.get("/{taxon_id}", response_model=TaxonResponse)
 async def read_taxon(
