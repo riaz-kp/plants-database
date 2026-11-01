@@ -1,4 +1,4 @@
-import { useParams, Link } from '@tanstack/react-router';
+import { useParams, useRouter, useCanGoBack, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { plantsApi } from '../../api/plants';
@@ -12,6 +12,9 @@ import {
 
 export const PlantDetails = () => {
     const { id } = useParams({ strict: false }) as { id: string };
+    const router = useRouter();
+    // Opened from inside the app (catalogue, a project, …): Back returns there
+    const canGoBack = useCanGoBack();
 
     const { data: plant, isLoading: plantLoading, error: plantError } = useQuery({
         queryKey: ['plants', id],
@@ -56,12 +59,22 @@ export const PlantDetails = () => {
         <div className="max-w-5xl mx-auto">
             {/* Nav */}
             <div className="flex items-center justify-between mb-8">
-                <Link
-                    to="/plants"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                >
-                    <ArrowLeft size={16} /> Back to Catalog
-                </Link>
+                {canGoBack ? (
+                    <button
+                        type="button"
+                        onClick={() => router.history.back()}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                        <ArrowLeft size={16} /> Back
+                    </button>
+                ) : (
+                    <Link
+                        to="/plants"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                        <ArrowLeft size={16} /> Back to Catalog
+                    </Link>
+                )}
                 <Link
                     to="/plants"
                     state={{ editPlant: plant } as any}

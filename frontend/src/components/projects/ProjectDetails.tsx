@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, memo, useCallback, useRef, Fragment } from 'react';
-import { useParams, Link } from '@tanstack/react-router';
+import { useParams, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft, Download, Plus, Pencil, Trash2, Leaf,
@@ -93,18 +93,35 @@ interface ProjectPlantRowProps {
     pp: any;
     idx: number;
     locked: boolean;
+    /** Clicks mark the plant instead of opening it */
+    selectMode: boolean;
     isSelected: boolean;
     onSelectChange: (plantId: string, selected: boolean) => void;
+    onOpen: (plantId: string) => void;
     onEdit: (plantId: string, notes: string) => void;
     onDelete: (plantId: string, plantName: string) => void;
 }
 
-const ProjectPlantRowMemo = memo(({ pp, idx, locked, isSelected, onSelectChange, onEdit, onDelete }: ProjectPlantRowProps) => {
+/** A click anywhere on a row/card marks the plant in select mode and opens it otherwise. */
+function plantItemClickHandler({ pp, selectMode, isSelected, onSelectChange, onOpen }: ProjectPlantRowProps) {
+    return (e: React.MouseEvent) => {
+        const target = e.target as Element;
+        // Edit/remove buttons and the checkbox handle their own clicks; plant links open the plant themselves
+        if (target.closest('button, input')) return;
+        if (selectMode) onSelectChange(pp.plant_id, !isSelected);
+        else if (!target.closest('a')) onOpen(pp.plant_id);
+    };
+}
+
+const ProjectPlantRowMemo = memo((props: ProjectPlantRowProps) => {
+    const { pp, idx, locked, selectMode, isSelected, onSelectChange, onEdit, onDelete } = props;
+    const handleClick = plantItemClickHandler(props);
     return (
         <TableRow
             key={pp.plant_id}
-            aria-selected={isSelected}
-            className={cn('transition-colors', isSelected ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-muted/20')}
+            onClick={handleClick}
+            aria-selected={selectMode ? isSelected : undefined}
+            className={cn('cursor-pointer transition-colors', isSelected ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-muted/20')}
         >
             {/* # */}
             <TableCell className="text-center text-xs text-muted-foreground tabular-nums">
@@ -112,15 +129,17 @@ const ProjectPlantRowMemo = memo(({ pp, idx, locked, isSelected, onSelectChange,
             </TableCell>
 
             {/* Select (for adding to another project, so it works on locked projects too) */}
-            <TableCell className="w-10 text-center">
-                <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) => onSelectChange(pp.plant_id, e.target.checked)}
-                    aria-label={`Select ${pp.plant?.common_name ?? 'plant'}`}
-                    className="w-4 h-4 cursor-pointer accent-primary"
-                />
-            </TableCell>
+            {selectMode && (
+                <TableCell className="w-10 text-center">
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => onSelectChange(pp.plant_id, e.target.checked)}
+                        aria-label={`Select ${pp.plant?.common_name ?? 'plant'}`}
+                        className="w-4 h-4 cursor-pointer accent-primary"
+                    />
+                </TableCell>
+            )}
 
             {/* Plant */}
             <TableCell>
@@ -144,6 +163,7 @@ const ProjectPlantRowMemo = memo(({ pp, idx, locked, isSelected, onSelectChange,
                         <Link
                             to="/plants/$id"
                             params={{ id: pp.plant_id }}
+                            disabled={selectMode}
                             className="group/plant inline-flex items-start gap-1 font-medium text-foreground hover:text-primary transition-colors leading-tight"
                         >
                             <span className="truncate">{pp.plant?.common_name}</span>
@@ -233,18 +253,24 @@ const ProjectPlantRowMemo = memo(({ pp, idx, locked, isSelected, onSelectChange,
 });
 
 /* ─── Card (standard view, card layout) ─── */
-const ProjectPlantCardMemo = memo(({ pp, idx, locked, isSelected, onSelectChange, onEdit, onDelete }: ProjectPlantRowProps) => {
+const ProjectPlantCardMemo = memo((props: ProjectPlantRowProps) => {
+    const { pp, idx, locked, selectMode, isSelected, onSelectChange, onEdit, onDelete } = props;
+    const handleClick = plantItemClickHandler(props);
     const plant = pp.plant;
     const image = plant?.image_url || plant?.icon_url;
     return (
-        <div className={cn(
-            'group flex flex-col rounded-xl border bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow',
-            isSelected ? 'border-primary ring-2 ring-primary' : 'border-border'
-        )}>
+        <div
+            onClick={handleClick}
+            className={cn(
+                'group flex flex-col rounded-xl border bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer',
+                isSelected ? 'border-primary ring-2 ring-primary' : 'border-border'
+            )}
+        >
             <div className="relative aspect-[4/3] bg-muted overflow-hidden">
                 <Link
                     to="/plants/$id"
                     params={{ id: pp.plant_id }}
+                    disabled={selectMode}
                     className="block w-full h-full"
                     aria-label={`Open ${plant?.common_name ?? 'plant'}`}
                 >
@@ -256,18 +282,16 @@ const ProjectPlantCardMemo = memo(({ pp, idx, locked, isSelected, onSelectChange
                         </div>
                     )}
                 </Link>
-                <label
-                    className="absolute top-1 left-1 p-1 cursor-pointer"
-                    title={isSelected ? 'Deselect' : 'Select'}
-                >
+                {isSelected && <div className="absolute inset-0 bg-primary/25 pointer-events-none" />}
+                {selectMode && (
                     <input
                         type="checkbox"
                         checked={isSelected}
                         onChange={(e) => onSelectChange(pp.plant_id, e.target.checked)}
                         aria-label={`Select ${plant?.common_name ?? 'plant'}`}
-                        className="block w-5 h-5 cursor-pointer accent-primary shadow-sm"
+                        className="absolute top-2 left-2 block w-5 h-5 cursor-pointer accent-primary shadow-sm"
                     />
-                </label>
+                )}
                 <span className="absolute top-2 right-2 min-w-6 h-6 px-1.5 rounded-full bg-black/45 text-white text-[11px] font-semibold tabular-nums flex items-center justify-center backdrop-blur-sm pointer-events-none">
                     {idx + 1}
                 </span>
@@ -277,6 +301,7 @@ const ProjectPlantCardMemo = memo(({ pp, idx, locked, isSelected, onSelectChange
                     <Link
                         to="/plants/$id"
                         params={{ id: pp.plant_id }}
+                        disabled={selectMode}
                         className="block font-semibold text-sm text-foreground hover:text-primary leading-tight truncate"
                     >
                         {plant?.common_name}
@@ -943,6 +968,7 @@ const ProjectQuotationRow = ({
 
 export const ProjectDetails = () => {
     const { id } = useParams({ strict: false }) as { id: string };
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { showAlert } = useAlert();
     const { confirm } = useConfirm();
@@ -979,6 +1005,8 @@ export const ProjectDetails = () => {
     const [pdfQuotationLoading, setPdfQuotationLoading] = useState(false);
     const [excelLoading, setExcelLoading] = useState(false);
     const [selectedPlantIds, setSelectedPlantIds] = useState<string[]>([]);
+    // Standard view: plant clicks mark plants only while "Select" is ticked, otherwise they open the plant
+    const [selectMode, setSelectMode] = useState(false);
     const [bulkUpdating, setBulkUpdating] = useState(false);
     const [bulkUnit, setBulkUnit] = useState('');
     const [bulkQty, setBulkQty] = useState('');
@@ -987,6 +1015,7 @@ export const ProjectDetails = () => {
 
     useEffect(() => {
         setSelectedPlantIds([]);
+        setSelectMode(false);
     }, [viewMode]);
 
     /* ── Share link state ── */
@@ -1236,6 +1265,16 @@ export const ProjectDetails = () => {
             setSelectedPlantIds([]);
         }
     }, []);
+
+    // Leaving select mode drops the marks
+    const changeSelectMode = useCallback((on: boolean) => {
+        setSelectMode(on);
+        if (!on) setSelectedPlantIds([]);
+    }, []);
+
+    const openPlant = useCallback((plantId: string) => {
+        navigate({ to: '/plants/$id', params: { id: plantId } });
+    }, [navigate]);
 
     /* ── Dialog helpers ── */
     const openAdd = useCallback(() => {
@@ -1890,35 +1929,53 @@ export const ProjectDetails = () => {
                             </div>
                         </div>
 
+                        {/* Select mode, for adding plants to another project (so it works on locked projects too) */}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 sm:px-5 py-2.5 border-b border-border/60 text-xs">
+                            <label className="flex items-center gap-2 font-medium text-muted-foreground cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={selectMode}
+                                    onChange={(e) => changeSelectMode(e.target.checked)}
+                                    className="w-4 h-4 cursor-pointer accent-primary"
+                                />
+                                Select
+                            </label>
+                            {selectMode && (
+                                <>
+                                    <span className="text-muted-foreground">Tap plants to mark them</span>
+                                    <Button
+                                        variant="link"
+                                        size="sm"
+                                        className="ml-auto h-auto p-0 text-xs"
+                                        disabled={filteredSorted.length === 0}
+                                        onClick={() => handleSelectAllChange(!allVisibleSelected, filteredSorted)}
+                                    >
+                                        {allVisibleSelected ? 'Deselect all' : `Select all (${filteredSorted.length})`}
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+
                         {standardLayout === 'cards' ? (
                             filteredSorted.length === 0 ? (
                                 <p className="h-24 flex items-center justify-center text-sm text-muted-foreground">No plants match your search.</p>
                             ) : (
-                                <>
-                                    <label className="flex w-fit items-center gap-2 px-4 pt-3 text-xs font-medium text-muted-foreground cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={allVisibleSelected}
-                                            onChange={(e) => handleSelectAllChange(e.target.checked, filteredSorted)}
-                                            className="w-4 h-4 cursor-pointer accent-primary"
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-3 sm:p-4">
+                                    {filteredSorted.map((pp, idx) => (
+                                        <ProjectPlantCardMemo
+                                            key={pp.plant_id}
+                                            pp={pp}
+                                            idx={idx}
+                                            locked={locked}
+                                            selectMode={selectMode}
+                                            isSelected={selectedIdSet.has(pp.plant_id)}
+                                            onSelectChange={handleSelectChange}
+                                            onOpen={openPlant}
+                                            onEdit={openEdit}
+                                            onDelete={handleDeletePlant}
                                         />
-                                        Select all
-                                    </label>
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-3 sm:p-4">
-                                        {filteredSorted.map((pp, idx) => (
-                                            <ProjectPlantCardMemo
-                                                key={pp.plant_id}
-                                                pp={pp}
-                                                idx={idx}
-                                                locked={locked}
-                                                isSelected={selectedIdSet.has(pp.plant_id)}
-                                                onSelectChange={handleSelectChange}
-                                                onEdit={openEdit}
-                                                onDelete={handleDeletePlant}
-                                            />
-                                        ))}
-                                    </div>
-                                </>
+                                    ))}
+                                </div>
                             )
                         ) : (
                         /* ── Table ── */
@@ -1927,15 +1984,7 @@ export const ProjectDetails = () => {
                                 <TableHeader>
                                     <TableRow className="bg-muted/30">
                                         <TableHead className="w-8 font-semibold text-center">#</TableHead>
-                                        <TableHead className="w-10 text-center">
-                                            <input
-                                                type="checkbox"
-                                                checked={allVisibleSelected}
-                                                onChange={(e) => handleSelectAllChange(e.target.checked, filteredSorted)}
-                                                aria-label="Select all plants"
-                                                className="w-4 h-4 cursor-pointer accent-primary"
-                                            />
-                                        </TableHead>
+                                        {selectMode && <TableHead className="w-10"><span className="sr-only">Selected</span></TableHead>}
                                         <SortTh label="Plant" col="common_name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="pl-0" />
                                         <SortTh label="Scientific" col="scientific_name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden sm:table-cell" />
                                         <SortTh label="Category" col="category" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden md:table-cell" />
@@ -1947,7 +1996,7 @@ export const ProjectDetails = () => {
                                 <TableBody>
                                     {filteredSorted.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                                            <TableCell colSpan={selectMode ? 8 : 7} className="h-24 text-center text-sm text-muted-foreground">
                                                 No plants match your search.
                                             </TableCell>
                                         </TableRow>
@@ -1958,8 +2007,10 @@ export const ProjectDetails = () => {
                                                 pp={pp}
                                                 idx={idx}
                                                 locked={locked}
+                                                selectMode={selectMode}
                                                 isSelected={selectedIdSet.has(pp.plant_id)}
                                                 onSelectChange={handleSelectChange}
+                                                onOpen={openPlant}
                                                 onEdit={openEdit}
                                                 onDelete={handleDeletePlant}
                                             />
@@ -2072,8 +2123,8 @@ export const ProjectDetails = () => {
                 <BulkAddToProjectBar
                     plantIds={selectedPlantIds}
                     excludeProjectId={project.id}
-                    onClear={() => setSelectedPlantIds([])}
-                    onAdded={() => setSelectedPlantIds([])}
+                    onClear={() => changeSelectMode(false)}
+                    onAdded={() => changeSelectMode(false)}
                 />
             )}
 
