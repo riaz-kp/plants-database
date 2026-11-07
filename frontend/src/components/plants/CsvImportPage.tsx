@@ -7,6 +7,7 @@ import { plantsApi } from '../../api/plants';
 import { categoriesApi } from '../../api/categories';
 import { useAlert } from '../../contexts/AlertContext';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import {
     Dialog,
     DialogContent,
@@ -20,6 +21,7 @@ import {
     ArrowLeft, Upload, FileUp, Loader2, Trash2, Plus,
     AlertCircle, ChevronRight, Info, X, ImageOff, RefreshCw, Maximize2,
     Copy, Check, Sparkles, AlertTriangle, CheckCircle2, XCircle, Circle, MinusCircle,
+    ClipboardPaste,
 } from 'lucide-react';
 
 // ── Field config ─────────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ const BLANK_ROW = (): Record<string, string> =>
     Object.fromEntries(ALL_FIELDS.map(f => [f.key, '']));
 
 type Stage = 'upload' | 'edit';
+const PASTED_NAME = 'Pasted CSV';
 
 // ── Step-by-step import (one plant per request, so progress is real and
 //    long imports never hit a single request timeout) ─────────────────────────
@@ -409,6 +412,8 @@ export const CsvImportPage = () => {
     const [fileName, setFileName] = useState('');
     const [parseErrors, setParseErrors] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
+    const [inputMode, setInputMode] = useState<'file' | 'paste'>('paste');
+    const [pastedCsv, setPastedCsv] = useState('');
 
     // Categories for the prompt
     const { data: categoriesOptions } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.getAll() });
@@ -496,7 +501,7 @@ List of Plants to Process:
     };
 
     // ── File handling ──────────────────────────────────────────────────────
-    const processFile = useCallback(async (file: File) => {
+    const processFile = useCallback(async (file: File, displayName?: string) => {
         if (!file.name.toLowerCase().endsWith('.csv')) {
             showAlert('Please upload a valid .csv file.', 'error');
             return;
@@ -504,7 +509,7 @@ List of Plants to Process:
         setIsPreviewing(true);
         try {
             const result = await ioApi.previewCsv(file);
-            setFileName(file.name);
+            setFileName(displayName ?? file.name);
             setParseErrors(result.errors);
             setRows(result.rows.length > 0 ? result.rows : [BLANK_ROW()]);
             setStage('edit');
@@ -524,8 +529,25 @@ List of Plants to Process:
 
     const handleFileInput = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
+        // Reset so picking the same file again still fires onChange
+        e.target.value = '';
         if (file) await processFile(file);
     }, [processFile]);
+
+    /** Send pasted CSV text through the same preview endpoint as an uploaded file. */
+    const handlePastePreview = useCallback(async () => {
+        // AI chats often wrap CSV in a ``` code fence despite being told not to
+        const text = pastedCsv
+            .trim()
+            .replace(/^```[a-z]*\s*\n/i, '')
+            .replace(/\n?```\s*$/, '')
+            .trim();
+        if (!text) {
+            showAlert('Paste some CSV text first.', 'error');
+            return;
+        }
+        await processFile(new File([text], 'pasted.csv', { type: 'text/csv' }), PASTED_NAME);
+    }, [pastedCsv, processFile, showAlert]);
 
     // ── Row editing ───────────────────────────────────────────────────────
     const updateCell = (rowIdx: number, key: string, value: string) => {
@@ -756,11 +778,73 @@ List of Plants to Process:
                         <div className="w-full space-y-2 text-center">
                             <h1 className="text-2xl font-bold text-foreground">Import Plants from CSV</h1>
                             <p className="text-sm text-muted-foreground">
-                                Upload a CSV file — you can review and edit every field before importing.
+                                Upload or paste CSV — you can review and edit every field before importing.
                             </p>
                         </div>
 
-                        {/* Drop zone */}
+                        {/* Input mode toggle */}
+                        <div className="w-full flex flex-col gap-4">
+                        <div role="tablist" aria-label="CSV source" className="inline-flex self-center rounded-xl border border-border bg-muted/40 p-1">
+                            {([
+                                { mode: 'paste', label: 'Paste CSV', Icon: ClipboardPaste },
+                                { mode: 'file', label: 'Upload file', Icon: FileUp },
+                            ] as const).map(({ mode, label, Icon }) => (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={inputMode === mode}
+                                    onClick={() => setInputMode(mode)}
+                                    disabled={isPreviewing}
+                                    className={cn(
+                                        'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
+                                        inputMode === mode
+                                            ? 'bg-background text-foreground shadow-sm'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                >
+                                    <Icon size={14} /> {label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {inputMode === 'paste' ? (
+                            <div className="w-full flex flex-col gap-3">
+                                <Textarea
+                                    value={pastedCsv}
+                                    onChange={e => setPastedCsv(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                            e.preventDefault();
+                                            handlePastePreview();
+                                        }
+                                    }}
+                                    disabled={isPreviewing}
+                                    autoFocus
+                                    spellCheck={false}
+                                    placeholder="Paste CSV here…"
+                                    aria-label="CSV text"
+                                    className="min-h-[220px] rounded-2xl font-mono text-xs leading-relaxed whitespace-pre overflow-auto"
+                                />
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-xs text-muted-foreground">
+                                        Header row optional if columns are in the standard order. {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to preview.
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        {pastedCsv && (
+                                            <Button variant="ghost" size="sm" onClick={() => setPastedCsv('')} disabled={isPreviewing}>
+                                                Clear
+                                            </Button>
+                                        )}
+                                        <Button size="sm" onClick={handlePastePreview} disabled={isPreviewing || !pastedCsv.trim()} className="gap-1.5">
+                                            {isPreviewing
+                                                ? <><Loader2 size={13} className="animate-spin" /> Reading CSV…</>
+                                                : <>Preview <ChevronRight size={13} /></>}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
                         <label className="w-full">
                             <input
                                 type="file"
@@ -806,6 +890,8 @@ List of Plants to Process:
                                 </span>
                             </div>
                         </label>
+                        )}
+                        </div>
 
                         <div className="w-full space-y-4">
                             <div className="flex items-center justify-between">
@@ -830,7 +916,7 @@ List of Plants to Process:
                             <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-4 flex gap-3">
                                 <Info size={15} className="text-emerald-600 shrink-0 mt-0.5" />
                                 <p className="text-xs text-emerald-800 leading-relaxed">
-                                    Copy the prompt above and paste it into ChatGPT/Claude along with your list of plants. Then download the resulting CSV and upload it here.
+                                    Copy the prompt above and paste it into ChatGPT/Claude along with your list of plants. Then paste the resulting CSV above, or download it and upload the file.
                                 </p>
                             </div>
                         </div>
@@ -866,7 +952,7 @@ List of Plants to Process:
                                     onClick={() => { setStage('upload'); setParseErrors([]); }}
                                     className="text-xs text-primary hover:underline font-medium"
                                 >
-                                    Re-upload
+                                    {fileName === PASTED_NAME ? 'Edit pasted CSV' : 'Re-upload'}
                                 </button>
                             </div>
 
