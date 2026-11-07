@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf,
     ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronsDownUp, X,
-    Sparkles, Loader2,
+    Sparkles, Loader2, AlertCircle,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { plantsApi } from '../../api/plants';
@@ -150,7 +150,8 @@ const TreeNode = memo(({ node, onSelect, selectedId, searchTerm, open, onOpenCha
     );
 
     const rowClass = cn(
-        'rounded-lg transition-colors px-1 scroll-mt-28',
+        // Scrolling a row into view keeps it clear of the sticky search bar and the phone bottom sheet
+        'rounded-lg transition-colors px-1 scroll-mt-28 scroll-mb-[calc(var(--sheet-h,0px)_+_0.75rem)] lg:scroll-mb-0',
         isSelected && 'bg-primary/5 ring-1 ring-primary/25',
     );
 
@@ -217,6 +218,18 @@ export const TaxonomyManager = () => {
     const [formMode, setFormMode] = useState<FormMode>(null);
     const [createParentId, setCreateParentId] = useState<string | null>(null);
     const [mobileSheet, setMobileSheet] = useState<MobileSheet>('closed');
+    // The phone sheet's height, so the page can leave room below the tree to scroll past it
+    const sheetRef = useRef<HTMLElement>(null);
+    const [sheetHeight, setSheetHeight] = useState(0);
+    useEffect(() => {
+        const el = sheetRef.current;
+        if (!el) return;
+        const update = () => setSheetHeight(Math.round(el.getBoundingClientRect().height));
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
 
     const [newName, setNewName] = useState('');
     const [newRank, setNewRank] = useState<Rank>(Rank.KINGDOM);
@@ -236,14 +249,17 @@ export const TaxonomyManager = () => {
         refetchInterval: writingDescriptions ? 10000 : false,
     });
 
-    // One last tree refresh once the background run finishes
+    const descriptionError = writingDescriptions ? null : descriptionStatus?.error ?? null;
+
+    // One last tree refresh once the background run finishes, and say so if it failed
     const wasWritingRef = useRef(false);
     useEffect(() => {
         if (wasWritingRef.current && !writingDescriptions) {
             queryClient.invalidateQueries({ queryKey: ['taxonomy', 'tree'] });
+            if (descriptionError) showAlert(`Couldn't write all descriptions. ${descriptionError}`, 'error');
         }
         wasWritingRef.current = writingDescriptions;
-    }, [writingDescriptions, queryClient]);
+    }, [writingDescriptions, descriptionError, queryClient, showAlert]);
 
     const fillDescriptionsMutation = useMutation({
         mutationFn: taxonomyApi.fillDescriptions,
@@ -352,6 +368,10 @@ export const TaxonomyManager = () => {
         setSelectedId(id);
         setFormMode(null);
         setMobileSheet(s => (s === 'full' ? 'full' : 'peek'));
+        // On phones the sheet that opens may cover the tapped row; nudge it back into view
+        window.setTimeout(() => {
+            document.querySelector(`[data-taxon-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 50);
     }, []);
 
     /** Selecting from the detail panel (breadcrumb, child list) also reveals the node in the tree. */
@@ -567,16 +587,24 @@ export const TaxonomyManager = () => {
                 </div>
 
                 {/* Actions */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2">
                     {childRank && (
-                        <Button size="sm" onClick={() => startCreate(node)} className="col-span-2">
+                        <Button size="sm" onClick={() => startCreate(node)} className="flex-1">
                             <Plus className="w-3.5 h-3.5 mr-1.5" />
                             Add {childRank.toLowerCase()}
                         </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={startEdit}>
-                        <Pencil className="w-3.5 h-3.5 mr-1.5" />
-                        Edit
+                    {/* Edit only needs its label when there's no Add button (species) */}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={startEdit}
+                        title={`Edit this ${node.rank.toLowerCase()}`}
+                        aria-label={`Edit this ${node.rank.toLowerCase()}`}
+                        className={cn(childRank ? 'w-9 px-0 shrink-0' : 'flex-1')}
+                    >
+                        <Pencil className={cn('w-3.5 h-3.5', !childRank && 'mr-1.5')} />
+                        {!childRank && 'Edit'}
                     </Button>
                     <Button
                         size="sm"
@@ -584,10 +612,10 @@ export const TaxonomyManager = () => {
                         onClick={handleDelete}
                         disabled={hasChildren || deleteMutation.isPending}
                         title={hasChildren ? 'Remove its child taxa first' : `Delete this ${node.rank.toLowerCase()}`}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
+                        aria-label={`Delete this ${node.rank.toLowerCase()}`}
+                        className="w-9 px-0 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
                     >
-                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                        Delete
+                        <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                 </div>
 
@@ -680,15 +708,25 @@ export const TaxonomyManager = () => {
                 <p className="text-sm">Select a taxon to see its details.</p>
             </div>
             {!!descriptionStatus?.missing && (
-                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className={cn(
+                    'flex items-center gap-3 rounded-lg border p-3',
+                    descriptionError ? 'border-destructive/30 bg-destructive/5' : 'border-primary/20 bg-primary/5',
+                )}>
                     {writingDescriptions
                         ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-primary" />
-                        : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
-                    <p className="flex-1 text-xs text-foreground/80">
-                        {writingDescriptions
-                            ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
-                            : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
-                    </p>
+                        : descriptionError
+                            ? <AlertCircle className="w-4 h-4 shrink-0 text-destructive" />
+                            : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
+                    <div className="flex-1 min-w-0 text-xs text-foreground/80">
+                        <p>
+                            {writingDescriptions
+                                ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
+                                : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
+                        </p>
+                        {descriptionError && (
+                            <p className="mt-0.5 text-destructive">Last attempt failed: {descriptionError}</p>
+                        )}
+                    </div>
                     {!writingDescriptions && renderFillButton('outline')}
                 </div>
             )}
@@ -717,7 +755,10 @@ export const TaxonomyManager = () => {
     const sheetRank = formMode ? newRank : selectedNode?.rank;
 
     return (
-        <div className={cn(mobileSheet !== 'closed' && 'pb-20 lg:pb-0')}>
+        <div
+            className="pb-[calc(var(--sheet-h)_+_1rem)] lg:pb-0"
+            style={{ '--sheet-h': `${sheetHeight}px` } as React.CSSProperties}
+        >
             {/* Page Header */}
             <div className="flex flex-col gap-1 mb-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -841,9 +882,13 @@ export const TaxonomyManager = () => {
 
                 {/* Detail panel — a sticky side panel on desktop, a bottom sheet on phones */}
                 <aside
+                    ref={sheetRef}
                     className={cn(
                         'flex flex-col bg-white border border-border overflow-hidden',
-                        'fixed inset-x-0 bottom-0 z-40 max-h-[80vh] rounded-t-2xl shadow-[0_-10px_30px_-12px_rgba(0,0,0,0.3)]',
+                        // Details take at most half the phone screen so the tree stays usable above;
+                        // the create / edit form gets more room
+                        'fixed inset-x-0 bottom-0 z-40 rounded-t-2xl shadow-[0_-10px_30px_-12px_rgba(0,0,0,0.3)]',
+                        formMode ? 'max-h-[85dvh]' : 'max-h-[50dvh]',
                         mobileSheet === 'closed' && 'hidden',
                         'lg:flex lg:sticky lg:inset-auto lg:top-0 lg:z-20 lg:col-span-2 lg:max-h-[calc(100vh-5rem)] lg:rounded-xl lg:shadow-sm',
                     )}

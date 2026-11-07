@@ -1876,7 +1876,7 @@ export const ProjectDetails = () => {
                 ) : (
                     <>
                         {/* ── Toolbar ── */}
-                        <div className="flex flex-row flex-wrap items-center gap-2 px-5 py-3 border-b border-border bg-muted/20">
+                        <div className="flex flex-row flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-b border-border bg-muted/20">
                             {/* Search */}
                             <div className="relative flex-1 min-w-[180px]">
                                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
@@ -1888,11 +1888,11 @@ export const ProjectDetails = () => {
                                 />
                             </div>
 
-                            {/* Filters Group */}
-                            <div className="flex items-center gap-2">
+                            {/* Filters Group: full width on phones so the category name isn't cut off */}
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
                                 {/* Category filter */}
                                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                                    <SelectTrigger className="w-[125px] sm:w-[150px] h-8 text-sm bg-background">
+                                    <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-[170px] h-8 text-sm text-left bg-background">
                                         <SelectValue placeholder="All categories" />
                                     </SelectTrigger>
                                     <SelectContent>
