@@ -587,16 +587,24 @@ export const TaxonomyManager = () => {
                 </div>
 
                 {/* Actions */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2">
                     {childRank && (
-                        <Button size="sm" onClick={() => startCreate(node)} className="col-span-2">
+                        <Button size="sm" onClick={() => startCreate(node)} className="flex-1">
                             <Plus className="w-3.5 h-3.5 mr-1.5" />
                             Add {childRank.toLowerCase()}
                         </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={startEdit}>
-                        <Pencil className="w-3.5 h-3.5 mr-1.5" />
-                        Edit
+                    {/* Edit only needs its label when there's no Add button (species) */}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={startEdit}
+                        title={`Edit this ${node.rank.toLowerCase()}`}
+                        aria-label={`Edit this ${node.rank.toLowerCase()}`}
+                        className={cn(childRank ? 'w-9 px-0 shrink-0' : 'flex-1')}
+                    >
+                        <Pencil className={cn('w-3.5 h-3.5', !childRank && 'mr-1.5')} />
+                        {!childRank && 'Edit'}
                     </Button>
                     <Button
                         size="sm"
@@ -604,10 +612,10 @@ export const TaxonomyManager = () => {
                         onClick={handleDelete}
                         disabled={hasChildren || deleteMutation.isPending}
                         title={hasChildren ? 'Remove its child taxa first' : `Delete this ${node.rank.toLowerCase()}`}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
+                        aria-label={`Delete this ${node.rank.toLowerCase()}`}
+                        className="w-9 px-0 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
                     >
-                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                        Delete
+                        <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                 </div>
 
