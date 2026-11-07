@@ -13,7 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.session import AsyncSessionLocal  # noqa: E402
 from app.services.taxon_description_service import (  # noqa: E402
+    DescriptionFillError,
     count_missing_descriptions,
+    describe_fill_error,
     fill_missing_descriptions,
 )
 
@@ -32,7 +34,11 @@ async def main() -> None:
 
     async with AsyncSessionLocal() as db:
         print(f"{await count_missing_descriptions(db)} taxa without a description", flush=True)
-        saved = await fill_missing_descriptions(db, limit=args.limit, dry_run=args.dry_run, on_batch=print_batch)
+        try:
+            saved = await fill_missing_descriptions(db, limit=args.limit, dry_run=args.dry_run, on_batch=print_batch)
+        except DescriptionFillError as exc:
+            print(f"Some batches failed: {describe_fill_error(exc)}")
+            saved = exc.saved
         if args.dry_run:
             print("Dry run: nothing saved")
         else:

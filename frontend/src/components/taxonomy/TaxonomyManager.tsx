@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Plus, Pencil, Trash2, Search, ListTree, XCircle, ExternalLink, Leaf,
     ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, ChevronsDownUp, X,
-    Sparkles, Loader2,
+    Sparkles, Loader2, AlertCircle,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { plantsApi } from '../../api/plants';
@@ -236,14 +236,17 @@ export const TaxonomyManager = () => {
         refetchInterval: writingDescriptions ? 10000 : false,
     });
 
-    // One last tree refresh once the background run finishes
+    const descriptionError = writingDescriptions ? null : descriptionStatus?.error ?? null;
+
+    // One last tree refresh once the background run finishes, and say so if it failed
     const wasWritingRef = useRef(false);
     useEffect(() => {
         if (wasWritingRef.current && !writingDescriptions) {
             queryClient.invalidateQueries({ queryKey: ['taxonomy', 'tree'] });
+            if (descriptionError) showAlert(`Couldn't write all descriptions. ${descriptionError}`, 'error');
         }
         wasWritingRef.current = writingDescriptions;
-    }, [writingDescriptions, queryClient]);
+    }, [writingDescriptions, descriptionError, queryClient, showAlert]);
 
     const fillDescriptionsMutation = useMutation({
         mutationFn: taxonomyApi.fillDescriptions,
@@ -680,15 +683,25 @@ export const TaxonomyManager = () => {
                 <p className="text-sm">Select a taxon to see its details.</p>
             </div>
             {!!descriptionStatus?.missing && (
-                <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className={cn(
+                    'flex items-center gap-3 rounded-lg border p-3',
+                    descriptionError ? 'border-destructive/30 bg-destructive/5' : 'border-primary/20 bg-primary/5',
+                )}>
                     {writingDescriptions
                         ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-primary" />
-                        : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
-                    <p className="flex-1 text-xs text-foreground/80">
-                        {writingDescriptions
-                            ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
-                            : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
-                    </p>
+                        : descriptionError
+                            ? <AlertCircle className="w-4 h-4 shrink-0 text-destructive" />
+                            : <Sparkles className="w-4 h-4 shrink-0 text-primary" />}
+                    <div className="flex-1 min-w-0 text-xs text-foreground/80">
+                        <p>
+                            {writingDescriptions
+                                ? <>Writing descriptions… <span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> left</>
+                                : <><span className="tabular-nums font-semibold">{descriptionStatus.missing}</span> {descriptionStatus.missing === 1 ? 'taxon has' : 'taxa have'} no description</>}
+                        </p>
+                        {descriptionError && (
+                            <p className="mt-0.5 text-destructive">Last attempt failed: {descriptionError}</p>
+                        )}
+                    </div>
                     {!writingDescriptions && renderFillButton('outline')}
                 </div>
             )}

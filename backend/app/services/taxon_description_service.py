@@ -1,8 +1,11 @@
 """Fills in short AI-written descriptions for taxa that don't have one."""
 import asyncio
+import json
 import logging
 from typing import Callable, Optional
 
+from fastapi import HTTPException
+from openai import APIConnectionError, APIStatusError, RateLimitError
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +20,40 @@ logger = logging.getLogger(__name__)
 LEGACY_PLACEHOLDER = "Auto-generated via AI autofill."
 BATCH_SIZE = 30
 RANK_ORDER = list(Rank)
+
+
+class DescriptionFillError(Exception):
+    """Some batches couldn't be written. `saved` descriptions were still saved; `cause` is the last failure."""
+
+    def __init__(self, saved: int, failed: int, cause: Exception):
+        super().__init__(f"{failed} taxa could not be described ({saved} saved): {cause!r}")
+        self.saved = saved
+        self.failed = failed
+        self.cause = cause
+
+
+class EmptyReplyError(Exception):
+    """The AI answered, but with no usable descriptions."""
+
+
+def describe_fill_error(exc: Exception) -> str:
+    """A short, user-facing reason a fill run failed."""
+    cause = exc.cause if isinstance(exc, DescriptionFillError) else exc
+    if isinstance(cause, RateLimitError):
+        reason = "The AI service's rate limit was reached. Try again in a few minutes."
+    elif isinstance(cause, APIStatusError):
+        reason = f"The AI service returned an error ({cause.status_code})."
+    elif isinstance(cause, APIConnectionError):
+        reason = "Couldn't reach the AI service. Check the internet connection."
+    elif isinstance(cause, HTTPException):
+        reason = str(cause.detail)
+    elif isinstance(cause, (json.JSONDecodeError, EmptyReplyError)):
+        reason = "The AI's reply couldn't be read."
+    else:
+        reason = f"Something went wrong ({type(cause).__name__})."
+    if isinstance(exc, DescriptionFillError) and exc.saved:
+        reason = f"Saved {exc.saved}, but some failed. {reason}"
+    return reason
 
 
 def needs_description(description: Optional[str]) -> bool:
@@ -47,6 +84,8 @@ async def fill_missing_descriptions(
     Broader ranks go first. A description edited in the meantime is never overwritten.
     `limit` counts distinct rank + name pairs. on_batch(results, done, total) gets
     (rank, name, description) for each of them in the batch.
+    A batch that fails is skipped and the rest still run; afterwards DescriptionFillError
+    is raised (or straight away after three failed batches in a row).
     """
     rows = (await db.execute(
         select(Taxon.id, Taxon.name, Taxon.rank, Taxon.parent_id, Taxon.description)
@@ -83,6 +122,8 @@ async def fill_missing_descriptions(
         unique = unique[:limit]
 
     saved = 0
+    failed = 0
+    last_error: Optional[Exception] = None
     failures_in_a_row = 0
     for start in range(0, len(unique), BATCH_SIZE):
         batch = unique[start:start + BATCH_SIZE]
@@ -90,12 +131,16 @@ async def fill_missing_descriptions(
             descriptions = await generate_taxon_descriptions([
                 {"rank": rows_[0].rank.value, "name": rows_[0].name, "lineage": lineage(rows_[0])} for rows_ in batch
             ])
+            if not any(descriptions):
+                raise EmptyReplyError("no descriptions in the AI reply")
             failures_in_a_row = 0
-        except Exception:
+        except Exception as exc:
             logger.exception("Generating taxon descriptions failed for a batch of %d", len(batch))
+            failed += len(batch)
+            last_error = exc
             failures_in_a_row += 1
             if failures_in_a_row >= 3:
-                raise
+                raise DescriptionFillError(saved, len(unique) - start, exc) from exc
             continue
 
         if not dry_run:
@@ -116,32 +161,37 @@ async def fill_missing_descriptions(
                 start + len(batch),
                 len(unique),
             )
+    if last_error is not None:
+        raise DescriptionFillError(saved, failed, last_error) from last_error
     return saved
 
 
 _fill_lock = asyncio.Lock()
 _fill_requested_again = False
+_last_error: Optional[str] = None
 
 
 async def fill_missing_descriptions_in_background() -> None:
     """Fill every missing description in its own session (for FastAPI BackgroundTasks).
 
     Only one run at a time; a request made during a run triggers one more pass afterwards,
-    so taxa created mid-run are picked up too.
+    so taxa created mid-run are picked up too. If a run fails, last_fill_error() says why.
     """
-    global _fill_requested_again
+    global _fill_requested_again, _last_error
     if _fill_lock.locked():
         _fill_requested_again = True
         return
     async with _fill_lock:
         while True:
             _fill_requested_again = False
+            _last_error = None
             try:
                 async with AsyncSessionLocal() as db:
                     saved = await fill_missing_descriptions(db)
                 logger.info("Filled %d taxon descriptions", saved)
-            except Exception:
+            except Exception as exc:
                 logger.exception("Filling taxon descriptions failed")
+                _last_error = describe_fill_error(exc)
                 return
             if not _fill_requested_again:
                 return
@@ -149,3 +199,8 @@ async def fill_missing_descriptions_in_background() -> None:
 
 def fill_running() -> bool:
     return _fill_lock.locked()
+
+
+def last_fill_error() -> Optional[str]:
+    """Why the last background run failed, or None if it succeeded (or none has run)."""
+    return _last_error

@@ -13,6 +13,7 @@ from app.services.taxon_description_service import (
     count_missing_descriptions,
     fill_missing_descriptions_in_background,
     fill_running,
+    last_fill_error,
 )
 
 router = APIRouter()
@@ -130,8 +131,14 @@ async def ensure_taxonomy_path(
 
 @router.get("/descriptions/status")
 async def taxon_descriptions_status(db: AsyncSession = Depends(get_db)) -> Any:
-    """How many taxa still lack a description, and whether they're being written now."""
-    return {"missing": await count_missing_descriptions(db), "running": fill_running()}
+    """How many taxa still lack a description, whether they're being written now,
+    and why the last run failed (None if it didn't)."""
+    running = fill_running()
+    return {
+        "missing": await count_missing_descriptions(db),
+        "running": running,
+        "error": None if running else last_fill_error(),
+    }
 
 
 @router.post("/descriptions/fill")
@@ -143,7 +150,7 @@ async def fill_taxon_descriptions(
     missing = await count_missing_descriptions(db)
     if missing:
         background_tasks.add_task(fill_missing_descriptions_in_background)
-    return {"missing": missing, "running": missing > 0 or fill_running()}
+    return {"missing": missing, "running": missing > 0 or fill_running(), "error": None}
 
 @router.get("/{taxon_id}", response_model=TaxonResponse)
 async def read_taxon(

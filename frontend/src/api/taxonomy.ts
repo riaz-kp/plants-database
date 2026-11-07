@@ -6,6 +6,8 @@ export interface TaxonDescriptionStatus {
     missing: number;
     /** Descriptions are being written in the background right now */
     running: boolean;
+    /** Why the last background run failed; null if it didn't */
+    error?: string | null;
 }
 
 export const taxonomyApi = {
