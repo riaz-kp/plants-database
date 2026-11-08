@@ -8,6 +8,7 @@ import { categoriesApi } from '../../api/categories';
 import { useAlert } from '../../contexts/AlertContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { cleanPastedCsv } from './csvPaste';
 import {
     Dialog,
     DialogContent,
@@ -536,14 +537,17 @@ List of Plants to Process:
 
     /** Send pasted CSV text through the same preview endpoint as an uploaded file. */
     const handlePastePreview = useCallback(async () => {
-        // AI chats often wrap CSV in a ``` code fence despite being told not to
-        const text = pastedCsv
-            .trim()
-            .replace(/^```[a-z]*\s*\n/i, '')
-            .replace(/\n?```\s*$/, '')
-            .trim();
+        const { text, lostLineBreaks } = cleanPastedCsv(pastedCsv);
         if (!text) {
             showAlert('Paste some CSV text first.', 'error');
+            return;
+        }
+        if (lostLineBreaks) {
+            showAlert(
+                'The pasted CSV is on one line, so its rows could not be separated. '
+                + 'Copy it again using the copy button on the code block, or upload the file.',
+                'error',
+            );
             return;
         }
         await processFile(new File([text], 'pasted.csv', { type: 'text/csv' }), PASTED_NAME);
