@@ -3,6 +3,32 @@ import { useEffect, useState } from 'react';
 import { aiApi } from '../../api/ai';
 import { plantsApi } from '../../api/plants';
 
+// ── CSV columns, in the order the import spreadsheet shows them ───────────────
+export const CSV_FIELDS: { key: string; label: string; width: string; required?: boolean; isImage?: boolean; isSticky?: boolean }[] = [
+    { key: 'common_name', label: 'Common Name', width: '160px', required: true, isSticky: true },
+    { key: 'scientific_name', label: 'Scientific Name', width: '160px' },
+    { key: 'category', label: 'Category', width: '120px' },
+    { key: 'planting_place', label: 'Planting Place', width: '130px' },
+    { key: 'kingdom', label: 'Kingdom', width: '110px', required: true },
+    { key: 'division', label: 'Division', width: '110px' },
+    { key: 'class', label: 'Class', width: '110px' },
+    { key: 'order', label: 'Order', width: '110px' },
+    { key: 'family', label: 'Family', width: '110px' },
+    { key: 'genus', label: 'Genus', width: '110px' },
+    { key: 'species', label: 'Species', width: '110px', required: true },
+    { key: 'description', label: 'Description', width: '200px' },
+    { key: 'common_diseases', label: 'Diseases', width: '180px' },
+    { key: 'care_water', label: 'Water', width: '140px' },
+    { key: 'care_sunlight', label: 'Sunlight', width: '140px' },
+    { key: 'care_soil', label: 'Soil', width: '140px' },
+    { key: 'care_maintenance', label: 'Maintenance', width: '140px' },
+    { key: 'icon_url', label: 'Icon URL', width: '320px', isImage: true },
+    { key: 'image_url', label: 'Image URL', width: '320px', isImage: true },
+];
+
+export const blankCsvRow = (): Record<string, string> =>
+    Object.fromEntries(CSV_FIELDS.map(f => [f.key, '']));
+
 // ── Step-by-step import (one plant per request, so progress is real and
 //    long imports never hit a single request timeout) ─────────────────────────
 export const TEXT_FIELDS = ['description', 'common_diseases', 'care_water', 'care_sunlight', 'care_soil', 'care_maintenance'];

@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-    AlertCircle, AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronDown, CircleDashed, ClipboardList,
-    Copy, Leaf, ListChecks, Loader2, Lock, RotateCcw, Sparkles, Undo2, X,
+    AlertCircle, AlertTriangle, ArrowLeft, Info, Check, CheckCircle2, ChevronDown, CircleDashed, ClipboardList,
+    Copy, LayoutList, Leaf, ListChecks, Loader2, Lock, RotateCcw, Sparkles, Table2, Undo2, X,
 } from 'lucide-react';
 
 import { projectsApi } from '../../api/projects';
@@ -15,6 +15,7 @@ import { useAlert } from '../../contexts/AlertContext';
 import { cn, cloudinaryThumb } from '../../lib-frontend/utils';
 import { cleanPastedCsv } from '../plants/csvPaste';
 import { ImportProgressOverlay } from '../plants/ImportProgressOverlay';
+import { CsvRowsTable } from '../plants/CsvRowsTable';
 import {
     buildBulkImportPrompt, DEFAULT_CATEGORY_LIST, errorMessage, prepareImportRow, rowName, useImportClock,
     type ImportJob,
@@ -35,6 +36,15 @@ import {
 } from '@/components/ui/dialog';
 
 type Stage = 'list' | 'review';
+type CsvDupes = Record<number, { id: string; name: string }>;
+
+/** Duplicate-check results as row index → the catalog plant that row already is */
+const toCsvDupes = (duplicates: { row_index: number; common_name: string; existing_plant_id?: string; existing_common_name?: string }[]): CsvDupes =>
+    Object.fromEntries(duplicates
+        .filter(d => d.existing_plant_id)
+        .map(d => [d.row_index, { id: d.existing_plant_id!, name: d.existing_common_name || d.common_name }]));
+
+const CSV_VIEW_KEY = 'projectImportCsvView';
 type CsvStatus = 'new' | 'in_catalog' | 'in_project';
 
 const MOD_KEY = typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? '⌘' : 'Ctrl';
@@ -150,9 +160,21 @@ export const ProjectImportPage = () => {
     const [csvRows, setCsvRows] = useState<Record<string, string>[] | null>(null);
     const [csvErrors, setCsvErrors] = useState<string[]>([]);
     /** CSV rows that are already in the catalog: row index → that catalog plant */
-    const [csvDupes, setCsvDupes] = useState<Record<number, { id: string; name: string }>>({});
+    const [csvDupes, setCsvDupes] = useState<CsvDupes>({});
     const [csvExcluded, setCsvExcluded] = useState<Set<number>>(new Set());
     const [copied, setCopied] = useState(false);
+    /** Short list, or every column editable; remembered per browser */
+    const [csvView, setCsvViewState] = useState<'list' | 'table'>(() => {
+        try { return localStorage.getItem(CSV_VIEW_KEY) === 'table' ? 'table' : 'list'; } catch { return 'list'; }
+    });
+    const setCsvView = (view: 'list' | 'table') => {
+        setCsvViewState(view);
+        try { localStorage.setItem(CSV_VIEW_KEY, view); } catch { /* storage unavailable */ }
+    };
+    /** Cell edits made, and how many of them the catalog check has seen */
+    const [csvEdits, setCsvEdits] = useState(0);
+    const [csvCheckedEdits, setCsvCheckedEdits] = useState(0);
+    const recheckPending = csvEdits !== csvCheckedEdits && !!csvRows?.length;
 
     /* ── Step 4: confirm + run ── */
     const [confirmOpen, setConfirmOpen] = useState(false);
@@ -169,6 +191,30 @@ export const ProjectImportPage = () => {
         if (next.has(value)) next.delete(value); else next.add(value);
         return next;
     };
+
+    const updateCsvCell = (rowIdx: number, key: string, value: string) => {
+        setCsvRows(prev => prev && prev.map((r, i) => (i === rowIdx ? { ...r, [key]: value } : r)));
+        setCsvEdits(n => n + 1);
+    };
+
+    // An edited name or species can make a row new, or one the catalog already has: check again
+    // a moment after typing stops. The import itself never duplicates a catalog plant either way.
+    useEffect(() => {
+        if (csvEdits === csvCheckedEdits || !csvRows?.length) return;
+        const rows = csvRows;
+        const edits = csvEdits;
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                const { duplicates } = await ioApi.findDuplicateRows(rows);
+                if (!cancelled) setCsvDupes(toCsvDupes(duplicates));
+            } catch {
+                /* keep the last statuses */
+            }
+            if (!cancelled) setCsvCheckedEdits(edits);
+        }, 700);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [csvEdits, csvCheckedEdits, csvRows]);
 
     /* ── Derived: each name resolved against the catalog and the project ── */
     const resolved = useMemo(() => {
@@ -286,17 +332,13 @@ export const ProjectImportPage = () => {
         try {
             const preview = await ioApi.previewCsv(new File([text], 'pasted.csv', { type: 'text/csv' }));
             const rows = preview.rows.filter(r => r.common_name?.trim() || r.species?.trim());
-            let dupes: Record<number, { id: string; name: string }> = {};
-            if (rows.length) {
-                const { duplicates } = await ioApi.findDuplicateRows(rows);
-                dupes = Object.fromEntries(duplicates
-                    .filter(d => d.existing_plant_id)
-                    .map(d => [d.row_index, { id: d.existing_plant_id!, name: d.existing_common_name || d.common_name }]));
-            }
+            const dupes = rows.length ? toCsvDupes((await ioApi.findDuplicateRows(rows)).duplicates) : {};
             setCsvErrors(preview.errors);
             setCsvRows(rows);
             setCsvDupes(dupes);
             setCsvExcluded(new Set());
+            setCsvEdits(0);
+            setCsvCheckedEdits(0);
             if (!rows.length && !preview.errors.length) showAlert('No plant rows found in the CSV.', 'error');
         } catch (err) {
             showAlert('Could not read the CSV: ' + errorMessage(err), 'error');
@@ -311,6 +353,8 @@ export const ProjectImportPage = () => {
         setCsvErrors([]);
         setCsvDupes({});
         setCsvExcluded(new Set());
+        setCsvEdits(0);
+        setCsvCheckedEdits(0);
     };
 
     const runImport = async () => {
@@ -398,6 +442,8 @@ export const ProjectImportPage = () => {
         setCsvRows(remaining.length ? (remaining as Record<string, string>[]) : null);
         setCsvDupes({});
         setCsvExcluded(new Set());
+        setCsvEdits(0);
+        setCsvCheckedEdits(0);
         setJobs(null);
     };
 
@@ -515,42 +561,109 @@ export const ProjectImportPage = () => {
 
                 {/* CSV rows */}
                 {csvRows && csvRows.length > 0 && (
-                    <div className="rounded-lg border border-border overflow-hidden">
-                        <div className="flex items-center justify-between gap-3 px-4 py-2 bg-muted/30 border-b border-border text-xs text-muted-foreground">
-                            <span>{csvRows.length} {csvRows.length === 1 ? 'row' : 'rows'} in the CSV</span>
-                            <span>
+                    <div className={cn(csvView === 'list' && 'rounded-lg border border-border overflow-hidden')}>
+                        <div className={cn(
+                            'flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xs text-muted-foreground',
+                            csvView === 'list' ? 'px-4 py-2 bg-muted/30 border-b border-border' : 'mb-2',
+                        )}>
+                            <span className="flex items-center gap-1.5">
+                                {csvRows.length} {csvRows.length === 1 ? 'row' : 'rows'} ·{' '}
                                 {csvItems.filter(c => c.selected && c.status === 'new').length} new
                                 {csvItems.some(c => c.status === 'in_catalog') && ` · ${csvItems.filter(c => c.selected && c.status === 'in_catalog').length} already in catalog`}
+                                {recheckPending && <span className="inline-flex items-center gap-1 text-primary"><Loader2 size={11} className="animate-spin" /> checking edits</span>}
                             </span>
+                            <div role="tablist" aria-label="CSV rows view" className="inline-flex rounded-md border border-border bg-background p-0.5">
+                                {([
+                                    { view: 'list', label: 'List', Icon: LayoutList },
+                                    { view: 'table', label: 'All columns', Icon: Table2 },
+                                ] as const).map(({ view, label, Icon }) => (
+                                    <button
+                                        key={view}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={csvView === view}
+                                        onClick={() => setCsvView(view)}
+                                        className={cn(
+                                            'flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                                            csvView === view ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        <Icon size={13} /> {label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                        <ul className="divide-y divide-border/70">
-                            {csvItems.map(c => {
-                                const sci = c.row.scientific_name?.trim() || [c.row.genus, c.row.species].filter(Boolean).join(' ');
-                                return (
-                                    <li key={c.i} className={cn('flex items-center gap-3 px-4 py-2.5', !c.selected && 'opacity-60')}>
-                                        <input
-                                            type="checkbox"
-                                            checked={c.selected}
-                                            disabled={c.status === 'in_project'}
-                                            onChange={() => setCsvExcluded(s => toggleIn(s, c.i))}
-                                            aria-label={`Import ${rowName(c.row)}`}
-                                            className="w-4 h-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed"
-                                        />
-                                        <div className="min-w-0 flex-1">
-                                            <p className="text-sm font-medium text-foreground truncate">{rowName(c.row) || `Row ${c.i + 1}`}</p>
-                                            <p className="text-xs text-muted-foreground truncate">
-                                                {sci && <i>{sci}</i>}
-                                                {c.row.category && <>{sci && ' · '}{c.row.category}</>}
-                                                {c.status !== 'new' && c.dup && normalizeName(c.dup.name) !== normalizeName(rowName(c.row)) && (
-                                                    <> · uses catalog plant “{c.dup.name}”</>
-                                                )}
-                                            </p>
-                                        </div>
-                                        <CsvStatusChip status={c.status} existingName={c.dup?.name} />
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        {csvView === 'list' ? (
+                            <ul className="divide-y divide-border/70">
+                                {csvItems.map(c => {
+                                    const sci = c.row.scientific_name?.trim() || [c.row.genus, c.row.species].filter(Boolean).join(' ');
+                                    return (
+                                        <li key={c.i} className={cn('flex items-center gap-3 px-4 py-2.5', !c.selected && 'opacity-60')}>
+                                            <input
+                                                type="checkbox"
+                                                checked={c.selected}
+                                                disabled={c.status === 'in_project'}
+                                                onChange={() => setCsvExcluded(s => toggleIn(s, c.i))}
+                                                aria-label={`Import ${rowName(c.row)}`}
+                                                className="w-4 h-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed"
+                                            />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-foreground truncate">{rowName(c.row) || `Row ${c.i + 1}`}</p>
+                                                <p className="text-xs text-muted-foreground truncate">
+                                                    {sci && <i>{sci}</i>}
+                                                    {c.row.category && <>{sci && ' · '}{c.row.category}</>}
+                                                    {c.status !== 'new' && c.dup && normalizeName(c.dup.name) !== normalizeName(rowName(c.row)) && (
+                                                        <> · uses catalog plant “{c.dup.name}”</>
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <CsvStatusChip status={c.status} existingName={c.dup?.name} />
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        ) : (
+                            <>
+                                <CsvRowsTable
+                                    rows={csvRows}
+                                    onCellChange={updateCsvCell}
+                                    className="max-h-[70vh]"
+                                    // Fade the contents, not the cells: a see-through sticky name column would show what scrolls under it
+                                    rowClassName={i => (csvItems[i]?.selected ? undefined : '[&_textarea]:opacity-50 [&_img]:opacity-50')}
+                                    lead={{
+                                        header: 'Import',
+                                        width: 104,
+                                        render: i => {
+                                            const c = csvItems[i];
+                                            if (!c) return null;
+                                            return (
+                                                <div className="flex flex-col items-start gap-1.5 px-1">
+                                                    <label className="flex items-center gap-1.5 text-[10px] tabular-nums text-muted-foreground cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={c.selected}
+                                                            disabled={c.status === 'in_project'}
+                                                            onChange={() => setCsvExcluded(s => toggleIn(s, i))}
+                                                            aria-label={`Import ${rowName(c.row) || `row ${i + 1}`}`}
+                                                            className="w-4 h-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
+                                                        />
+                                                        {i + 1}
+                                                    </label>
+                                                    <CsvStatusChip status={c.status} existingName={c.dup?.name} />
+                                                </div>
+                                            );
+                                        },
+                                    }}
+                                />
+                                <p className="mt-2 text-[11px] text-muted-foreground flex items-start gap-1.5">
+                                    <Info size={12} className="text-amber-500 shrink-0 mt-0.5" />
+                                    <span>
+                                        Edit any cell before importing. Blank description, care and image cells are filled in by AI during the import.
+                                        Required columns are marked <span className="text-red-400 font-bold">*</span>.
+                                    </span>
+                                </p>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -867,8 +980,8 @@ export const ProjectImportPage = () => {
                                 <p className="text-muted-foreground">Nothing selected to add yet</p>
                             )}
                         </div>
-                        <Button onClick={() => setConfirmOpen(true)} disabled={total === 0 || running} className="shrink-0">
-                            Review &amp; import
+                        <Button onClick={() => setConfirmOpen(true)} disabled={total === 0 || running || recheckPending} className="shrink-0">
+                            {recheckPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Checking edits…</> : <>Review &amp; import</>}
                         </Button>
                     </div>
                 </div>
@@ -905,7 +1018,7 @@ export const ProjectImportPage = () => {
                     </div>
                     <DialogFooter className="gap-2 sm:gap-0">
                         <Button variant="outline" onClick={() => setConfirmOpen(false)}>Back</Button>
-                        <Button onClick={runImport} disabled={total === 0}>
+                        <Button onClick={runImport} disabled={total === 0 || recheckPending}>
                             Import {total} {total === 1 ? 'plant' : 'plants'}
                         </Button>
                     </DialogFooter>
