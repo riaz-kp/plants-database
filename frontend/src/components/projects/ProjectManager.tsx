@@ -13,7 +13,7 @@ import type { ProjectCreate, ProjectSummary } from '../../types/project';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { ProjectFormDialog } from './ProjectFormDialog';
-import { cn } from '@/lib-frontend/utils';
+import { cn, rowLinkProps, stretchedLink } from '@/lib-frontend/utils';
 import { formatDate, timeAgo } from '@/lib-frontend/dates';
 
 import { Button } from '@/components/ui/button';
@@ -116,11 +116,6 @@ const PlantCount = ({ count, compact }: { count: number; compact?: boolean }) =>
     </span>
 );
 
-/* The name link stretches over the whole card or row (::after), so a click anywhere opens the
-   project, and cmd/middle-click still opens it in a new tab. The actions menu sits above it. */
-const STRETCHED_LINK =
-    "after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring";
-
 const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectItemProps) => (
     <div className="group relative flex flex-col rounded-xl border border-border bg-card shadow-sm hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200">
         <div className="flex items-start gap-3 p-5 pb-3">
@@ -129,7 +124,7 @@ const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Projec
                 <Link
                     to="/projects/$id"
                     params={{ id: project.id }}
-                    className={cn('block font-semibold text-foreground leading-snug group-hover:text-primary transition-colors', STRETCHED_LINK, 'after:rounded-xl')}
+                    className={cn('block font-semibold text-foreground leading-snug group-hover:text-primary transition-colors', stretchedLink, 'after:rounded-xl')}
                 >
                     {project.name}
                 </Link>
@@ -168,7 +163,7 @@ const ProjectCardMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Projec
 const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: ProjectItemProps) => {
     const mobileMeta = [project.client_name, project.location].filter(Boolean).join(' · ');
     return (
-        <TableRow className="group relative cursor-pointer hover:bg-muted/40 transition-colors">
+        <TableRow {...rowLinkProps} className="group cursor-pointer hover:bg-muted/40 transition-colors">
             {/* Below md the name column takes the leftover width and truncates, keeping the actions on screen */}
             <TableCell className="py-3 w-full max-w-0 md:w-auto md:max-w-none">
                 <div className="flex items-center gap-3 min-w-0">
@@ -177,7 +172,8 @@ const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Pr
                         <Link
                             to="/projects/$id"
                             params={{ id: project.id }}
-                            className={cn('block font-medium text-foreground truncate group-hover:text-primary transition-colors', STRETCHED_LINK)}
+                            data-row-link
+                            className="block font-medium text-foreground truncate group-hover:text-primary transition-colors focus-visible:outline-none focus-visible:underline"
                         >
                             {project.name}
                         </Link>
@@ -203,9 +199,7 @@ const ProjectTableRowMemo = memo(({ project, onEdit, onDelete, onDuplicate }: Pr
             </TableCell>
             <TableCell className="w-20 pl-0 pr-3">
                 <div className="flex items-center justify-end gap-1">
-                    <span className="relative z-10">
-                        <ActionsMenu project={project} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
-                    </span>
+                    <ActionsMenu project={project} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
                     <ChevronRight className="hidden sm:block w-4 h-4 text-muted-foreground/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                 </div>
             </TableCell>
