@@ -794,6 +794,16 @@ export const PlantManager = () => {
         else { setEditingPlantId(null); resetForm(); setIsCreating(true); }
     }, [isCreating, editingPlantId, cancelEdit, resetForm]);
 
+    // "New → Plant" on the dashboard lands here with the editor already open
+    useEffect(() => {
+        if ((location.state as { createPlant?: boolean } | undefined)?.createPlant) {
+            setEditingPlantId(null);
+            resetForm();
+            setIsCreating(true);
+            navigate({ to: '.', replace: true, state: {} as any });
+        }
+    }, [location.state, navigate, resetForm]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!isIndoor && !isOutdoor) {

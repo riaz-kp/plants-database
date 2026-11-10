@@ -57,8 +57,16 @@ export const taxonomyTreeQueryOptions = () => queryOptions({
     staleTime: 5 * 60 * 1000,
 });
 
+// Short staleTime so counts catch up with plants and projects added elsewhere
 export const dashboardQueryOptions = () => queryOptions({
     queryKey: ['dashboard', 'stats'],
     queryFn: () => dashboardApi.getStats(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
 });
+
+/** The lists the dashboard shows. Plants and projects match the first page those pages load, so the cache is shared. */
+export const DASHBOARD_LISTS = {
+    plants: { skip: 0, limit: 20, sort: 'recent' },
+    projects: { skip: 0, limit: 12, sort: 'newest' },
+    categories: { skip: 0, limit: 100 },
+} as const;
