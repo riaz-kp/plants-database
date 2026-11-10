@@ -24,7 +24,7 @@ export function SidebarContent({ onClose }: { onClose?: () => void }) {
                     className="w-9 h-9 shrink-0"
                     style={{ filter: 'brightness(0) invert(1) opacity(0.90)' }}
                 />
-                <span className="text-white font-semibold text-base tracking-wide uppercase">
+                <span className="wordmark text-white text-base">
                     Landschaft
                 </span>
             </div>

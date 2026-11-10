@@ -37,7 +37,7 @@ export function AuthenticatedShell() {
                                 }}
                             />
                         </Link>
-                        <Link to="/" className="font-medium text-base text-[#1F4D2E] tracking-tight">
+                        <Link to="/" className="wordmark text-base text-[#1F4D2E]">
                             LANDSCHAFT
                         </Link>
                     </div>

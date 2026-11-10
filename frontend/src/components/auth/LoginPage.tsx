@@ -40,7 +40,7 @@ export function LoginPage() {
                     <div className="flex justify-center mb-0">
                         <img src="/logo.svg" alt="Logo" className="w-12 h-12" style={{ filter: 'brightness(0) saturate(100%) invert(18%) sepia(28%) saturate(1194%) hue-rotate(92deg) brightness(95%) contrast(90%)' }} />
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight text-[#1F4D2E]">LANDSCHAFT</CardTitle>
+                    <CardTitle className="wordmark text-2xl font-normal tracking-normal text-[#1F4D2E]">LANDSCHAFT</CardTitle>
                     <CardDescription>
                         Enter your credentials to access the plants database
                     </CardDescription>

@@ -420,9 +420,8 @@ export function ProjectPublicView() {
             .pv-bar-wordmark {
                 color: #fff;
                 font-family: 'Montserrat', sans-serif;
-                font-weight: 700;
+                font-weight: 400;
                 font-size: 17px;
-                letter-spacing: 0.05em;
                 text-transform: uppercase;
             }
             .pv-bar-tagline {
