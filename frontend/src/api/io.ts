@@ -29,6 +29,8 @@ export const ioApi = {
             common_name: string;
             scientific_name: string;
             existing_plant_id?: string;
+            existing_common_name?: string;
+            existing_scientific_name?: string | null;
         }>;
     }> => {
         const response = await client.post("/import/rows/duplicates", rows);

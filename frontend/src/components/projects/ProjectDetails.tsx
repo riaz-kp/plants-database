@@ -7,7 +7,7 @@ import {
     ChevronsUpDown, Lock, LockOpen, LayoutGrid, LayoutList,
     Link2, Copy, Check, RefreshCw, FileSpreadsheet,
     CalendarDays, Trees, Building2, ClipboardList, Receipt, Loader2,
-    ArrowDownUp, Filter,
+    ArrowDownUp, Filter, ListPlus,
 } from 'lucide-react';
 // The PDF/Excel exporters (and @react-pdf/renderer, exceljs) load on first export
 import { pdfDate } from './projectExportUtils';
@@ -1635,6 +1635,21 @@ export const ProjectDetails = () => {
 
     const showAddToProjectBar = viewMode === 'standard' && selectedPlantIds.length > 0;
 
+    /* Paste a list of plant names: add the ones in the catalog, create the rest from CSV */
+    const bulkImportButton = locked ? (
+        <Button variant="outline" size="sm" disabled title="Unlock the project to import plants">
+            <ListPlus className="w-4 h-4 sm:mr-2" />
+            <span className="sr-only sm:not-sr-only">Bulk import</span>
+        </Button>
+    ) : (
+        <Button asChild variant="outline" size="sm" title="Paste a list of plants to add">
+            <Link to="/projects/$id/import" params={{ id }}>
+                <ListPlus className="w-4 h-4 sm:mr-2" />
+                <span className="sr-only sm:not-sr-only">Bulk import</span>
+            </Link>
+        </Button>
+    );
+
     const toolbarSelect = 'h-8 w-full min-w-0 px-2.5 sm:px-3 text-sm text-left bg-background lg:w-[168px]';
     const toolbarSelectActive = 'border-primary/50 bg-primary/5 text-primary';
 
@@ -1955,11 +1970,14 @@ export const ProjectDetails = () => {
                                 </span>
                             )}
                         </div>
-                        {/* Add button sits here on phones */}
-                        <Button size="sm" onClick={openAdd} disabled={locked} className="sm:hidden shrink-0">
-                            <Plus className="w-4 h-4 mr-1.5" />
-                            Add Plant
-                        </Button>
+                        {/* Import + add buttons sit here on phones */}
+                        <div className="flex items-center gap-2 sm:hidden shrink-0">
+                            {bulkImportButton}
+                            <Button size="sm" onClick={openAdd} disabled={locked}>
+                                <Plus className="w-4 h-4 mr-1.5" />
+                                Add Plant
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -1980,10 +1998,13 @@ export const ProjectDetails = () => {
                                 </button>
                             ))}
                         </div>
-                        <Button size="sm" onClick={openAdd} disabled={locked} className="hidden sm:flex shrink-0">
-                            <Plus className="w-4 h-4 mr-2" />
-                            Add Plant
-                        </Button>
+                        <div className="hidden sm:flex items-center gap-2 shrink-0">
+                            {bulkImportButton}
+                            <Button size="sm" onClick={openAdd} disabled={locked}>
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add Plant
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
@@ -1991,7 +2012,15 @@ export const ProjectDetails = () => {
                     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                         <Leaf className="w-8 h-8 mb-3 opacity-20" />
                         <p className="text-sm">No plants added yet.</p>
-                        {!locked && <Button variant="link" size="sm" className="mt-1" onClick={openAdd}>Add the first plant</Button>}
+                        {!locked && (
+                            <p className="mt-1 text-sm">
+                                <Button variant="link" size="sm" className="px-1" onClick={openAdd}>Add the first plant</Button>
+                                or
+                                <Button asChild variant="link" size="sm" className="px-1">
+                                    <Link to="/projects/$id/import" params={{ id }}>import a list</Link>
+                                </Button>
+                            </p>
+                        )}
                     </div>
                 ) : isDocView ? (
                     <>

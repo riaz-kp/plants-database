@@ -1,7 +1,7 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 import uuid
 from datetime import date, datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.plant import PlantResponse
 
 # ProjectPlant Schemas
@@ -54,6 +54,45 @@ class ProjectPlantsBulkCreate(BaseModel):
 class ProjectPlantsBulkResult(BaseModel):
     added: int
     skipped: int
+
+# Bulk import into a project
+class PlantNameMatchRequest(BaseModel):
+    names: List[str] = Field(..., max_length=1000)
+
+class PlantBrief(BaseModel):
+    id: uuid.UUID
+    common_name: str
+    scientific_name: Optional[str] = None
+    category: Optional[str] = None
+    icon_url: Optional[str] = None
+
+class PlantSuggestion(PlantBrief):
+    in_project: bool = False
+
+class PlantNameMatch(BaseModel):
+    name: str
+    status: Literal["found", "in_project", "missing"]
+    plant: Optional[PlantBrief] = None
+    # Other catalog plants with exactly this name (e.g. two "Croton"s)
+    alternatives: List[PlantBrief] = []
+    # Close catalog names for a missing name
+    suggestions: List[PlantSuggestion] = []
+
+class PlantNameMatchResponse(BaseModel):
+    results: List[PlantNameMatch]
+
+class ProjectImportRowResult(BaseModel):
+    status: Literal["created", "linked", "already_in_project", "failed"]
+    plant_id: Optional[uuid.UUID] = None
+    error: Optional[str] = None
+
+class ProjectImportResult(BaseModel):
+    created: int
+    linked: int
+    already_in_project: int
+    failed: int
+    errors: List[str] = []
+    rows: List[ProjectImportRowResult] = []
 
 class ProjectResponse(ProjectBase):
     id: uuid.UUID
