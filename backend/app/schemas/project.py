@@ -24,6 +24,7 @@ class ProjectPlantUpdate(BaseModel):
     rate: Optional[float] = None
 
 class ProjectPlantResponse(ProjectPlantBase):
+    added_at: Optional[datetime] = None
     plant: Optional[PlantResponse] = None # Nested plant details
     model_config = ConfigDict(from_attributes=True)
 

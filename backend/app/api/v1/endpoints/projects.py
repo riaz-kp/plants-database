@@ -459,7 +459,9 @@ async def duplicate_project(
             quantity=pp.quantity,
             unit=pp.unit,
             optimum_height_size=pp.optimum_height_size,
-            rate=pp.rate
+            rate=pp.rate,
+            # Keep the source's "Recently added" order
+            added_at=pp.added_at,
         )
         db.add(new_pp)
     

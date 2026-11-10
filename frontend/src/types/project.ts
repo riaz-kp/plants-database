@@ -8,6 +8,8 @@ export interface ProjectPlant {
     unit?: string;
     optimum_height_size?: string;
     rate?: number;
+    /** When the plant was added to the project (ISO, UTC) */
+    added_at?: string;
 }
 
 export interface Project {
