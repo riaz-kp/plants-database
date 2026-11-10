@@ -1,9 +1,9 @@
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import uuid
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 import sqlalchemy as sa
@@ -17,8 +17,11 @@ from app.models.share_link import ProjectShareLink
 from app.schemas.project import (
     ProjectCreate, ProjectResponse, ProjectPlantCreate, ProjectUpdate, ProjectListResponse,
     ProjectLockUpdate, ProjectPlantsBulkCreate, ProjectPlantsBulkResult, ProjectSummary,
+    PlantNameMatchRequest, PlantNameMatchResponse, ProjectImportResult,
 )
 from app.core.security import get_current_user
+from app.services.project_import_service import match_plant_names, import_rows_into_project
+from app.services.taxon_description_service import fill_missing_descriptions_in_background
 
 router = APIRouter()
 
@@ -263,6 +266,56 @@ async def add_plants_to_project_bulk(
     await db.commit()
     return {"added": len(to_add), "skipped": len(already_in_project)}
 
+@router.post("/{project_id}/import/match", response_model=PlantNameMatchResponse, dependencies=[Depends(get_current_user)])
+async def match_project_plant_names(
+    *,
+    db: AsyncSession = Depends(get_db),
+    project_id: uuid.UUID,
+    request: PlantNameMatchRequest
+) -> Any:
+    """
+    Bulk import, step 1: say which pasted plant names are in the catalog, already in
+    this project, or missing (with close catalog names). Writes nothing.
+    """
+    result = await db.execute(select(Project.id).filter(Project.id == project_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"results": await match_plant_names(db, project_id, request.names)}
+
+@router.post("/{project_id}/import/rows", response_model=ProjectImportResult, dependencies=[Depends(get_current_user)])
+async def import_rows_into_project_endpoint(
+    *,
+    db: AsyncSession = Depends(get_db),
+    background_tasks: BackgroundTasks,
+    project_id: uuid.UUID,
+    rows: List[Dict[str, str]] = Body(...),
+    skip_ai: bool = Query(False),
+) -> Any:
+    """
+    Bulk import, CSV step: create each row's plant in the catalog (a row that is already
+    in the catalog reuses that plant) and add it to the project.
+    skip_ai=true when the caller already ran the AI autofill step itself.
+    """
+    result = await db.execute(select(Project).filter(Project.id == project_id))
+    project = result.scalars().first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _ensure_unlocked(project)
+
+    try:
+        outcome = await import_rows_into_project(db, project_id, rows, skip_ai=skip_ai)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f'Import failed: {e}')
+
+    if outcome["created"] or outcome["linked"]:
+        project.updated_at = datetime.utcnow()
+        await db.commit()
+    if outcome["created"]:
+        # Describe any taxa the import created
+        background_tasks.add_task(fill_missing_descriptions_in_background)
+    return outcome
+
 @router.patch("/{project_id}/lock", response_model=ProjectResponse, dependencies=[Depends(get_current_user)])
 async def set_project_lock(
     *,
@@ -459,7 +512,9 @@ async def duplicate_project(
             quantity=pp.quantity,
             unit=pp.unit,
             optimum_height_size=pp.optimum_height_size,
-            rate=pp.rate
+            rate=pp.rate,
+            # Keep the source's "Recently added" order
+            added_at=pp.added_at,
         )
         db.add(new_pp)
     

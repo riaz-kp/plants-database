@@ -34,13 +34,13 @@ export function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-            <Card className="w-full max-w-md shadow-lg border-green-50">
+        <div className="min-h-screen flex items-center justify-center bg-background px-4">
+            <Card className="w-full max-w-md shadow-lg border-border">
                 <CardHeader className="space-y-1 text-center">
                     <div className="flex justify-center mb-0">
-                        <img src="/logo.svg" alt="Logo" className="w-12 h-12" style={{ filter: 'brightness(0) saturate(100%) invert(18%) sepia(28%) saturate(1194%) hue-rotate(92deg) brightness(95%) contrast(90%)' }} />
+                        <img src="/logo-color.svg" alt="Logo" className="w-14 h-14" />
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight text-[#1F4D2E]">LANDSCHAFT</CardTitle>
+                    <CardTitle className="wordmark text-2xl font-normal tracking-normal text-primary">LANDSCHAFT</CardTitle>
                     <CardDescription>
                         Enter your credentials to access the plants database
                     </CardDescription>
@@ -76,12 +76,12 @@ export function LoginPage() {
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground focus:outline-none"
                                 >
                                     {showPassword ? (
-                                        <EyeOff className="h-4 w-4 text-[#1F4D2E]" />
+                                        <EyeOff className="h-4 w-4 text-primary" />
                                     ) : (
-                                        <Eye className="h-4 w-4 text-[#1F4D2E]" />
+                                        <Eye className="h-4 w-4 text-primary" />
                                     )}
                                 </button>
                             </div>
@@ -94,7 +94,7 @@ export function LoginPage() {
                         )}
                         <Button
                             type="submit"
-                            className="w-full bg-[#1F4D2E] hover:bg-[#163a22] text-white"
+                            className="w-full"
                             disabled={isLoading}
                         >
                             {isLoading ? (

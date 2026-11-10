@@ -38,6 +38,8 @@ class ProjectPlant(Base):
     unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     optimum_height_size: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     rate: Mapped[Optional[float]] = mapped_column(sa.Float, nullable=True)
+    # When the plant was added to the project (for "Recently added" sorting)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=sa.text('now()'), nullable=False)
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="plants")

@@ -7,6 +7,7 @@ import {
     ChevronsUpDown, Lock, LockOpen, LayoutGrid, LayoutList,
     Link2, Copy, Check, RefreshCw, FileSpreadsheet,
     CalendarDays, Trees, Building2, ClipboardList, Receipt, Loader2,
+    ArrowDownUp, Filter, ListPlus,
 } from 'lucide-react';
 // The PDF/Excel exporters (and @react-pdf/renderer, exceljs) load on first export
 import { pdfDate } from './projectExportUtils';
@@ -15,7 +16,7 @@ import { projectsApi } from '../../api/projects';
 import type { ShareLinkInfo } from '../../api/projects';
 import { plantsApi } from '../../api/plants';
 import { projectDetailsQueryOptions, taxonomyTreeQueryOptions } from '../../api/queryOptions';
-import type { ProjectPlantCreate, ProjectCreate, Project } from '../../types/project';
+import type { ProjectPlantCreate, ProjectCreate, Project, ProjectPlant } from '../../types/project';
 import type { Plant } from '../../types/plant';
 import { useAlert } from '../../contexts/AlertContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
@@ -54,8 +55,128 @@ import {
 } from '@/components/ui/table';
 
 /* ── types ── */
-type SortKey = 'common_name' | 'scientific_name' | 'category' | 'planting_place' | 'notes';
+type ViewMode = 'standard' | 'boq' | 'quotation';
+type SortKey =
+    | 'added_at' | 'common_name' | 'scientific_name' | 'category' | 'planting_place' | 'notes'
+    | 'quantity' | 'rate' | 'amount';
 type SortDir = 'asc' | 'desc';
+type PlantSort = { key: SortKey; dir: SortDir };
+/** BOQ / quotation row filter: which rows still need details */
+type RowFilter = 'all' | 'incomplete' | 'complete' | 'no_quantity' | 'no_unit' | 'no_size' | 'no_rate';
+
+const DEFAULT_SORT: PlantSort = { key: 'common_name', dir: 'asc' };
+const NUMERIC_SORT_KEYS: SortKey[] = ['quantity', 'rate', 'amount'];
+
+/** The sort keys each view can use */
+const VIEW_SORT_KEYS: Record<ViewMode, SortKey[]> = {
+    standard: ['added_at', 'common_name', 'scientific_name', 'category', 'planting_place', 'notes'],
+    boq: ['added_at', 'common_name', 'scientific_name', 'category', 'quantity'],
+    quotation: ['added_at', 'common_name', 'scientific_name', 'category', 'quantity', 'rate', 'amount'],
+};
+
+/** BOQ / quotation rows grouped by category already sit in category order, so sorting by it means nothing */
+const sortKeysFor = (view: ViewMode, grouped: boolean) =>
+    view !== 'standard' && grouped ? VIEW_SORT_KEYS[view].filter(k => k !== 'category') : VIEW_SORT_KEYS[view];
+
+/** Sort menu presets; each view lists the ones its sort keys allow */
+const SORT_OPTIONS: (PlantSort & { label: string })[] = [
+    { key: 'added_at', dir: 'desc', label: 'Recently added' },
+    { key: 'added_at', dir: 'asc', label: 'Oldest added' },
+    { key: 'common_name', dir: 'asc', label: 'Name (A–Z)' },
+    { key: 'common_name', dir: 'desc', label: 'Name (Z–A)' },
+    { key: 'scientific_name', dir: 'asc', label: 'Scientific name (A–Z)' },
+    { key: 'category', dir: 'asc', label: 'Category (A–Z)' },
+    { key: 'planting_place', dir: 'asc', label: 'Place (A–Z)' },
+    { key: 'quantity', dir: 'desc', label: 'Quantity (high–low)' },
+    { key: 'quantity', dir: 'asc', label: 'Quantity (low–high)' },
+    { key: 'rate', dir: 'desc', label: 'Rate (high–low)' },
+    { key: 'amount', dir: 'desc', label: 'Amount (high–low)' },
+];
+
+const SORT_FIELD_LABELS: Record<SortKey, string> = {
+    added_at: 'Date added', common_name: 'Name', scientific_name: 'Scientific name', category: 'Category',
+    planting_place: 'Place', notes: 'Notes', quantity: 'Quantity', rate: 'Rate', amount: 'Amount',
+};
+
+/** Label for any sort, including column-header ones that aren't in the menu (e.g. Notes Z–A) */
+function sortLabel({ key, dir }: PlantSort) {
+    const preset = SORT_OPTIONS.find(o => o.key === key && o.dir === dir);
+    if (preset) return preset.label;
+    const order = NUMERIC_SORT_KEYS.includes(key)
+        ? (dir === 'asc' ? 'low–high' : 'high–low')
+        : (dir === 'asc' ? 'A–Z' : 'Z–A');
+    return `${SORT_FIELD_LABELS[key]} (${order})`;
+}
+
+const sortValue = (s: PlantSort) => `${s.key}:${s.dir}`;
+function parseSort(value: string | null): PlantSort | null {
+    const [key, dir] = (value ?? '').split(':');
+    if (!(key in SORT_FIELD_LABELS) || (dir !== 'asc' && dir !== 'desc')) return null;
+    return { key: key as SortKey, dir };
+}
+
+const ROW_FILTER_OPTIONS: { value: RowFilter; label: string; quotationOnly?: boolean }[] = [
+    { value: 'all', label: 'All rows' },
+    { value: 'incomplete', label: 'Incomplete rows' },
+    { value: 'complete', label: 'Complete rows' },
+    { value: 'no_quantity', label: 'Missing quantity' },
+    { value: 'no_unit', label: 'Missing unit' },
+    { value: 'no_size', label: 'Missing height / size' },
+    { value: 'no_rate', label: 'Missing rate', quotationOnly: true },
+];
+
+const isBlank = (v: unknown) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+
+/** Which BOQ / quotation fields a row still needs */
+function missingFields(pp: ProjectPlant, view: ViewMode) {
+    return {
+        no_quantity: isBlank(pp.quantity),
+        no_unit: isBlank(pp.unit),
+        no_size: isBlank(pp.optimum_height_size),
+        no_rate: view === 'quotation' && isBlank(pp.rate),
+    };
+}
+
+function matchesRowFilter(pp: ProjectPlant, view: ViewMode, filter: RowFilter) {
+    if (filter === 'all' || view === 'standard') return true;
+    const missing = missingFields(pp, view);
+    const anyMissing = Object.values(missing).some(Boolean);
+    if (filter === 'incomplete') return anyMissing;
+    if (filter === 'complete') return !anyMissing;
+    return missing[filter];
+}
+
+/** Sort value of one plant: a string, a number, or null (always listed last) */
+function sortableValue(pp: ProjectPlant, key: SortKey): string | number | null {
+    switch (key) {
+        case 'added_at': return pp.added_at ? Date.parse(pp.added_at) : null;
+        case 'common_name': return pp.plant?.common_name || null;
+        case 'scientific_name': return pp.plant?.scientific_name || pp.plant?.taxon?.name || null;
+        case 'category': return pp.plant?.category || null;
+        case 'planting_place': return pp.plant?.planting_place || null;
+        case 'notes': return pp.notes || null;
+        case 'quantity': return isBlank(pp.quantity) ? null : pp.quantity!;
+        case 'rate': return isBlank(pp.rate) ? null : pp.rate!;
+        case 'amount': return isBlank(pp.quantity) || isBlank(pp.rate) ? null : pp.quantity! * pp.rate!;
+    }
+}
+
+function comparePlants(a: ProjectPlant, b: ProjectPlant, { key, dir }: PlantSort) {
+    const av = sortableValue(a, key);
+    const bv = sortableValue(b, key);
+    let result = 0;
+    if (av === null || bv === null) {
+        // Blank values go last whichever way the list is sorted
+        result = av === bv ? 0 : av === null ? 1 : -1;
+    } else {
+        result = typeof av === 'number' && typeof bv === 'number'
+            ? av - bv
+            : String(av).localeCompare(String(bv), undefined, { sensitivity: 'base', numeric: true });
+        if (dir === 'desc') result = -result;
+    }
+    // Ties (e.g. plants added together) fall back to name order
+    return result || (a.plant?.common_name || '').localeCompare(b.plant?.common_name || '', undefined, { sensitivity: 'base' });
+}
 
 // BOQ / quotation: image + common name stay visible while scrolling sideways.
 // Solid backgrounds so the scrolled columns slide underneath them.
@@ -66,21 +187,22 @@ const STICKY_HEAD_BG = 'bg-[#f7f5f1]';
 
 /* ── SortHeader helper ── */
 function SortTh({
-    label, col, sortKey, sortDir, onSort, className = '',
+    label, col, sort, onSort, className = '',
 }: {
-    label: string; col: SortKey; sortKey: SortKey; sortDir: SortDir;
+    label: string; col: SortKey; sort: PlantSort;
     onSort: (col: SortKey) => void; className?: string;
 }) {
-    const active = sortKey === col;
+    const active = sort.key === col;
     return (
         <TableHead
             className={`font-semibold cursor-pointer select-none hover:bg-muted/40 transition-colors ${className}`}
             onClick={() => onSort(col)}
+            aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
         >
             <span className="inline-flex items-center gap-1">
                 {label}
                 {active
-                    ? sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ? sort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
                     : <ChevronsUpDown className="w-3 h-3 opacity-30" />}
             </span>
         </TableHead>
@@ -458,9 +580,25 @@ const todayIso = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+/** BOQ / quotation common name; shows the category under it when rows aren't grouped by category */
+function BoqNameCell({ pp, showCategory }: { pp: ProjectPlant; showCategory: boolean }) {
+    const category = pp.plant?.category || 'Uncategorized';
+    return (
+        <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3`} title={pp.plant?.common_name}>
+            <span className="block truncate font-semibold text-foreground">{pp.plant?.common_name || '—'}</span>
+            {showCategory && (
+                <span className="block truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground" title={category}>
+                    {category}
+                </span>
+            )}
+        </TableCell>
+    );
+}
+
 const ProjectBoqRow = ({
     pp,
     idx,
+    showCategory,
     onDelete,
     onUpdate,
     isSelected,
@@ -469,6 +607,7 @@ const ProjectBoqRow = ({
 }: {
     pp: any;
     idx: number;
+    showCategory: boolean;
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
@@ -627,9 +766,7 @@ const ProjectBoqRow = ({
             </TableCell>
 
             {/* Common Name */}
-            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
-                {pp.plant?.common_name || '—'}
-            </TableCell>
+            <BoqNameCell pp={pp} showCategory={showCategory} />
 
             {/* Scientific Name */}
             <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
@@ -704,6 +841,7 @@ const ProjectBoqRow = ({
 const ProjectQuotationRow = ({
     pp,
     idx,
+    showCategory,
     onDelete,
     onUpdate,
     isSelected,
@@ -712,6 +850,7 @@ const ProjectQuotationRow = ({
 }: {
     pp: any;
     idx: number;
+    showCategory: boolean;
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
@@ -878,9 +1017,7 @@ const ProjectQuotationRow = ({
                 </div>
             </TableCell>
 
-            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
-                {pp.plant?.common_name || '—'}
-            </TableCell>
+            <BoqNameCell pp={pp} showCategory={showCategory} />
 
             <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
                 {pp.plant?.scientific_name || pp.plant?.taxon?.name || '—'}
@@ -986,8 +1123,15 @@ export const ProjectDetails = () => {
     /* ── Table state ── */
     const [search, setSearch] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('__all__');
-    const [sortKey, setSortKey] = useState<SortKey>('common_name');
-    const [sortDir, setSortDir] = useState<SortDir>('asc');
+    const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+    // Remembered per browser, like the list/card layout
+    const [sort, setSortState] = useState<PlantSort>(() => {
+        try { return parseSort(localStorage.getItem('projectPlantsSort')) ?? DEFAULT_SORT; } catch { return DEFAULT_SORT; }
+    });
+    const setSort = useCallback((next: PlantSort) => {
+        setSortState(next);
+        try { localStorage.setItem('projectPlantsSort', sortValue(next)); } catch { /* storage unavailable */ }
+    }, []);
     const [isEditProjectOpen, setIsEditProjectOpen] = useState(false);
     const [standardLayout, setStandardLayout] = useState<'list' | 'cards'>(() => {
         try { return localStorage.getItem('projectPlantsLayout') === 'cards' ? 'cards' : 'list'; } catch { return 'list'; }
@@ -996,11 +1140,19 @@ export const ProjectDetails = () => {
         setStandardLayout(layout);
         try { localStorage.setItem('projectPlantsLayout', layout); } catch { /* storage unavailable */ }
     };
+    // BOQ / quotation: rows under category headings (sorted within each), or one list sorted as a whole
+    const [groupByCategory, setGroupByCategory] = useState(() => {
+        try { return localStorage.getItem('projectBoqGroupByCategory') !== 'off'; } catch { return true; }
+    });
+    const changeGroupByCategory = (on: boolean) => {
+        setGroupByCategory(on);
+        try { localStorage.setItem('projectBoqGroupByCategory', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    };
     const boqTableRef = useRef<HTMLTableElement>(null);
     const bulkBarRef = useRef<HTMLDivElement>(null);
 
     const [pdfLoading, setPdfLoading] = useState(false);
-    const [viewMode, setViewMode] = useState<'standard' | 'boq' | 'quotation'>('standard');
+    const [viewMode, setViewMode] = useState<ViewMode>('standard');
     const [pdfBoqLoading, setPdfBoqLoading] = useState(false);
     const [pdfQuotationLoading, setPdfQuotationLoading] = useState(false);
     const [excelLoading, setExcelLoading] = useState(false);
@@ -1016,7 +1168,14 @@ export const ProjectDetails = () => {
     useEffect(() => {
         setSelectedPlantIds([]);
         setSelectMode(false);
+        // Drop a row filter the new view doesn't offer (Missing rate outside the quotation)
+        if (viewMode === 'boq') setRowFilter(f => (f === 'no_rate' ? 'all' : f));
     }, [viewMode]);
+
+    // Drop a sort the view doesn't offer (e.g. Amount outside the quotation, Category while grouped)
+    useEffect(() => {
+        setSortState(s => (sortKeysFor(viewMode, groupByCategory).includes(s.key) ? s : DEFAULT_SORT));
+    }, [viewMode, groupByCategory]);
 
     /* ── Share link state ── */
     const [shareLink, setShareLink] = useState<ShareLinkInfo | null>(null);
@@ -1333,17 +1492,12 @@ export const ProjectDetails = () => {
 
     const isSaving = addPlantMutation.isPending || updatePlantMutation.isPending;
 
-    /* ── Sort handler ── */
+    /* ── Sort handler (column headers: same column flips the order) ── */
     const handleSort = useCallback((col: SortKey) => {
-        setSortKey(prevKey => {
-            if (prevKey === col) {
-                setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-                return prevKey;
-            }
-            setSortDir('asc');
-            return col;
-        });
-    }, []);
+        setSort(sort.key === col
+            ? { key: col, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+            : { key: col, dir: 'asc' });
+    }, [sort, setSort]);
 
     /* ── Derived data ── */
     const uniqueCategories = useMemo(() => {
@@ -1352,31 +1506,56 @@ export const ProjectDetails = () => {
         return Array.from(cats).sort();
     }, [project]);
 
-    const filteredSorted = useMemo(() => {
+    const isDocView = viewMode !== 'standard';
+    const effectiveRowFilter: RowFilter = isDocView ? rowFilter : 'all';
+    const filtersActive = !!search.trim() || categoryFilter !== '__all__' || effectiveRowFilter !== 'all';
+    const clearFilters = useCallback(() => {
+        setSearch('');
+        setCategoryFilter('__all__');
+        setRowFilter('all');
+    }, []);
+
+    // Search + category first, so the row filter menu can count what each option would show
+    const searchFiltered = useMemo(() => {
         if (!project) return [];
-        const q = search.toLowerCase();
+        const q = search.trim().toLowerCase();
+        return project.plants.filter(pp => {
+            if (q) {
+                const fields = [
+                    pp.plant?.common_name, pp.plant?.scientific_name, pp.plant?.taxon?.name, pp.notes,
+                    // BOQ / quotation rows can also be found by what's typed into them
+                    ...(isDocView ? [pp.unit, pp.optimum_height_size] : []),
+                ];
+                if (!fields.some(f => f?.toLowerCase().includes(q))) return false;
+            }
+            return categoryFilter === '__all__' || pp.plant?.category === categoryFilter;
+        });
+    }, [project, search, categoryFilter, isDocView]);
 
-        return [...project.plants]
-            .filter(pp => {
-                const matchSearch = !q
-                    || pp.plant?.common_name?.toLowerCase().includes(q)
-                    || pp.plant?.scientific_name?.toLowerCase().includes(q)
-                    || (pp.notes || '').toLowerCase().includes(q);
-                const matchCat = categoryFilter === '__all__' || pp.plant?.category === categoryFilter;
-                return matchSearch && matchCat;
-            })
-            .sort((a, b) => {
-                let av = '', bv = '';
-                if (sortKey === 'common_name') { av = a.plant?.common_name || ''; bv = b.plant?.common_name || ''; }
-                else if (sortKey === 'scientific_name') { av = a.plant?.scientific_name || ''; bv = b.plant?.scientific_name || ''; }
-                else if (sortKey === 'category') { av = a.plant?.category || ''; bv = b.plant?.category || ''; }
-                else if (sortKey === 'planting_place') { av = a.plant?.planting_place || ''; bv = b.plant?.planting_place || ''; }
-                else if (sortKey === 'notes') { av = a.notes || ''; bv = b.notes || ''; }
-                return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-            });
-    }, [project, search, categoryFilter, sortKey, sortDir]);
+    const rowFilterCounts = useMemo(() => {
+        const counts = {} as Record<RowFilter, number>;
+        if (!isDocView) return counts;
+        for (const { value } of ROW_FILTER_OPTIONS) {
+            counts[value] = searchFiltered.filter(pp => matchesRowFilter(pp, viewMode, value)).length;
+        }
+        return counts;
+    }, [searchFiltered, viewMode, isDocView]);
 
-    const boqGroups = useMemo(() => {
+    const filteredSorted = useMemo(() => searchFiltered
+        .filter(pp => matchesRowFilter(pp, viewMode, effectiveRowFilter))
+        .sort((a, b) => comparePlants(a, b, sort)),
+    [searchFiltered, viewMode, effectiveRowFilter, sort]);
+
+    // BOQ / quotation bulk edit only touches rows you can see: hidden rows leave the selection
+    useEffect(() => {
+        if (!isDocView) return;
+        const visible = new Set(filteredSorted.map(pp => pp.plant_id));
+        setSelectedPlantIds(prev => (prev.every(pid => visible.has(pid)) ? prev : prev.filter(pid => visible.has(pid))));
+    }, [filteredSorted, isDocView]);
+
+    // One unnamed group when grouping is off: a single list in the chosen sort order
+    const boqGroups = useMemo((): [string | null, typeof filteredSorted][] => {
+        if (!groupByCategory) return [[null, filteredSorted]];
         const groups = new Map<string, typeof filteredSorted>();
         for (const pp of filteredSorted) {
             const cat = pp.plant?.category || 'Uncategorized';
@@ -1384,7 +1563,7 @@ export const ProjectDetails = () => {
             groups.get(cat)!.push(pp);
         }
         return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    }, [filteredSorted]);
+    }, [filteredSorted, groupByCategory]);
 
     const totalQuotationAmount = useMemo(() => {
         if (!project) return 0;
@@ -1403,6 +1582,17 @@ export const ProjectDetails = () => {
         }, 0);
     }, [project]);
 
+    // Quotation footer totals: just the rows shown while filtering
+    const shownTotals = useMemo(() => filteredSorted.reduce(
+        (t, pp) => ({ qty: t.qty + (pp.quantity ?? 0), amount: t.amount + (pp.quantity ?? 0) * (pp.rate ?? 0) }),
+        { qty: 0, amount: 0 },
+    ), [filteredSorted]);
+    const footerQty = filtersActive ? shownTotals.qty : totalQuotationQty;
+    const footerAmount = filtersActive ? shownTotals.amount : totalQuotationAmount;
+
+    const sortOptions = SORT_OPTIONS.filter(o => sortKeysFor(viewMode, groupByCategory).includes(o.key));
+    const rowFilterOptions = ROW_FILTER_OPTIONS.filter(o => !o.quotationOnly || viewMode === 'quotation');
+
 
     // BOQ / quotation column headers float under the page top (or the bulk edit bar)
     const getHeaderTop = useCallback(() => {
@@ -1411,7 +1601,7 @@ export const ProjectDetails = () => {
         if (bulkBarRef.current) top = Math.max(top, bulkBarRef.current.getBoundingClientRect().bottom + 6);
         return top;
     }, []);
-    useFloatingTableHeader(boqTableRef, getHeaderTop, [viewMode, filteredSorted.length, selectedPlantIds.length > 0, isLoading]);
+    useFloatingTableHeader(boqTableRef, getHeaderTop, [viewMode, filteredSorted.length, selectedPlantIds.length > 0, isLoading, groupByCategory]);
 
     const projectPlantIds = useMemo(() => new Set(project?.plants.map(pp => pp.plant_id) ?? []), [project]);
     const selectedIdSet = useMemo(() => new Set(selectedPlantIds), [selectedPlantIds]);
@@ -1444,6 +1634,154 @@ export const ProjectDetails = () => {
     const exportingPdf = pdfBoqLoading || pdfQuotationLoading;
 
     const showAddToProjectBar = viewMode === 'standard' && selectedPlantIds.length > 0;
+
+    /* Paste a list of plant names: add the ones in the catalog, create the rest from CSV */
+    const bulkImportButton = locked ? (
+        <Button variant="outline" size="sm" disabled title="Unlock the project to import plants">
+            <ListPlus className="w-4 h-4 sm:mr-2" />
+            <span className="sr-only sm:not-sr-only">Bulk import</span>
+        </Button>
+    ) : (
+        <Button asChild variant="outline" size="sm" title="Paste a list of plants to add">
+            <Link to="/projects/$id/import" params={{ id }}>
+                <ListPlus className="w-4 h-4 sm:mr-2" />
+                <span className="sr-only sm:not-sr-only">Bulk import</span>
+            </Link>
+        </Button>
+    );
+
+    const toolbarSelect = 'h-8 w-full min-w-0 px-2.5 sm:px-3 text-sm text-left bg-background lg:w-[168px]';
+    const toolbarSelectActive = 'border-primary/50 bg-primary/5 text-primary';
+
+    /* Search, filters and sort: one toolbar for every view */
+    const plantsToolbar = (
+        <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-b border-border bg-muted/20">
+            <div className="flex items-center gap-2 w-full lg:w-auto lg:flex-1 lg:min-w-[220px]">
+                {/* Search */}
+                <div className="relative flex-1 min-w-0">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                        type="search"
+                        placeholder={isDocView ? 'Search name, unit, size…' : 'Search plants, notes…'}
+                        aria-label="Search plants"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="pl-8 h-8 text-sm bg-background w-full"
+                    />
+                </div>
+
+                {/* List / card layout */}
+                {!isDocView && (
+                    <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-background shrink-0">
+                        <Button
+                            variant={standardLayout === 'list' ? 'secondary' : 'ghost'}
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => changeStandardLayout('list')}
+                            aria-pressed={standardLayout === 'list'}
+                            title="List view"
+                        >
+                            <LayoutList className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                            variant={standardLayout === 'cards' ? 'secondary' : 'ghost'}
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => changeStandardLayout('cards')}
+                            aria-pressed={standardLayout === 'cards'}
+                            title="Card view"
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                        </Button>
+                    </div>
+                )}
+            </div>
+
+            {/* Filters + sort: two per row on phones so labels aren't cut off */}
+            <div className={cn('grid grid-cols-2 gap-2 w-full lg:flex lg:w-auto', isDocView && 'md:grid-cols-4')}>
+                {/* Category */}
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger aria-label="Filter by category" className={cn(toolbarSelect, categoryFilter !== '__all__' && toolbarSelectActive)}>
+                        <SelectValue placeholder="All categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="__all__">All categories</SelectItem>
+                        {uniqueCategories.map(c => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+
+                {/* BOQ / quotation: rows that still need details */}
+                {isDocView && (
+                    <Select value={rowFilter} onValueChange={v => setRowFilter(v as RowFilter)}>
+                        <SelectTrigger aria-label="Show rows" className={cn(toolbarSelect, 'gap-1.5', rowFilter !== 'all' && toolbarSelectActive)}>
+                            {/* !flex: the trigger line-clamps its direct spans */}
+                            <span className="!flex items-center gap-1.5 min-w-0">
+                                <Filter className="hidden sm:block w-3.5 h-3.5 shrink-0 opacity-60" />
+                                <span className="truncate">
+                                    <SelectValue>{ROW_FILTER_OPTIONS.find(o => o.value === rowFilter)?.label}</SelectValue>
+                                </span>
+                            </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {rowFilterOptions.map(o => (
+                                <SelectItem key={o.value} value={o.value}>
+                                    {o.label}
+                                    <span className="ml-2 text-xs tabular-nums text-muted-foreground">{rowFilterCounts[o.value] ?? 0}</span>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+
+                {/* Sort */}
+                <Select value={sortValue(sort)} onValueChange={v => { const next = parseSort(v); if (next) setSort(next); }}>
+                    <SelectTrigger aria-label="Sort plants" className={cn(toolbarSelect, 'gap-1.5')}>
+                        <span className="!flex items-center gap-1.5 min-w-0">
+                            <ArrowDownUp className="hidden sm:block w-3.5 h-3.5 shrink-0 opacity-60" />
+                            <span className="truncate">
+                                <SelectValue>{sortLabel(sort)}</SelectValue>
+                            </span>
+                        </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                        {sortOptions.map(o => (
+                            <SelectItem key={sortValue(o)} value={sortValue(o)}>{o.label}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+
+                {/* BOQ / quotation: category headings on, or off to sort the whole list as one */}
+                {isDocView && (
+                    <label
+                        className="flex items-center gap-1.5 h-8 min-w-0 px-2 sm:px-2.5 rounded-md border border-input bg-background text-sm text-foreground cursor-pointer select-none whitespace-nowrap hover:bg-muted/40 transition-colors"
+                        title={groupByCategory
+                            ? 'Rows sit under category headings and sort within each. Turn off to sort the whole list.'
+                            : 'Rows are one list sorted as a whole. Turn on to put them under category headings.'}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={groupByCategory}
+                            onChange={(e) => changeGroupByCategory(e.target.checked)}
+                            className="w-4 h-4 shrink-0 cursor-pointer accent-primary"
+                        />
+                        <span className="truncate">Group by category</span>
+                    </label>
+                )}
+            </div>
+        </div>
+    );
+
+    /* "Showing 4 of 20 plants" while anything narrows the list */
+    const filterSummary = filtersActive && (
+        <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
+            <span>Showing {filteredSorted.length} of {project.plants.length} plants</span>
+            <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={clearFilters}>
+                Clear filters
+            </Button>
+        </div>
+    );
 
     return (
         <div className={cn('max-w-5xl mx-auto', showAddToProjectBar && 'pb-24')}>
@@ -1632,11 +1970,14 @@ export const ProjectDetails = () => {
                                 </span>
                             )}
                         </div>
-                        {/* Add button sits here on phones */}
-                        <Button size="sm" onClick={openAdd} disabled={locked} className="sm:hidden shrink-0">
-                            <Plus className="w-4 h-4 mr-1.5" />
-                            Add Plant
-                        </Button>
+                        {/* Import + add buttons sit here on phones */}
+                        <div className="flex items-center gap-2 sm:hidden shrink-0">
+                            {bulkImportButton}
+                            <Button size="sm" onClick={openAdd} disabled={locked}>
+                                <Plus className="w-4 h-4 mr-1.5" />
+                                Add Plant
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -1657,10 +1998,13 @@ export const ProjectDetails = () => {
                                 </button>
                             ))}
                         </div>
-                        <Button size="sm" onClick={openAdd} disabled={locked} className="hidden sm:flex shrink-0">
-                            <Plus className="w-4 h-4 mr-2" />
-                            Add Plant
-                        </Button>
+                        <div className="hidden sm:flex items-center gap-2 shrink-0">
+                            {bulkImportButton}
+                            <Button size="sm" onClick={openAdd} disabled={locked}>
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add Plant
+                            </Button>
+                        </div>
                     </div>
                 </div>
 
@@ -1668,10 +2012,20 @@ export const ProjectDetails = () => {
                     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                         <Leaf className="w-8 h-8 mb-3 opacity-20" />
                         <p className="text-sm">No plants added yet.</p>
-                        {!locked && <Button variant="link" size="sm" className="mt-1" onClick={openAdd}>Add the first plant</Button>}
+                        {!locked && (
+                            <p className="mt-1 text-sm">
+                                <Button variant="link" size="sm" className="px-1" onClick={openAdd}>Add the first plant</Button>
+                                or
+                                <Button asChild variant="link" size="sm" className="px-1">
+                                    <Link to="/projects/$id/import" params={{ id }}>import a list</Link>
+                                </Button>
+                            </p>
+                        )}
                     </div>
-                ) : viewMode === 'boq' || viewMode === 'quotation' ? (
+                ) : isDocView ? (
                     <>
+                        {plantsToolbar}
+
                         {/* Bulk Edit Toolbar — phones: title + buttons on top, inputs below; wider: title, then inputs + buttons */}
                         {selectedPlantIds.length > 0 && !locked && (
                             <div ref={bulkBarRef} className="sticky top-2 z-30 mx-3 sm:mx-5 my-3 p-3 sm:p-4 bg-[#f5f7f4] border border-primary/25 rounded-xl shadow-lg grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -1810,18 +2164,20 @@ export const ProjectDetails = () => {
                                     {filteredSorted.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="h-24 text-center text-sm text-muted-foreground">
-                                                No plants found.
+                                                <span className="sticky left-5">No plants match these filters.</span>
                                             </TableCell>
                                         </TableRow>
                                     ) : (
                                         boqGroups.map(([category, pps]) => (
-                                            <Fragment key={category}>
-                                                {/* Group Header Row */}
-                                                <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
-                                                    <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
-                                                        <span className="sticky left-5">{category} ({pps.length})</span>
-                                                    </TableCell>
-                                                </TableRow>
+                                            <Fragment key={category ?? '__all__'}>
+                                                {/* Group Header Row (none when grouping is off) */}
+                                                {category !== null && (
+                                                    <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
+                                                        <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
+                                                            <span className="sticky left-5">{category} ({pps.length})</span>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
                                                 {pps.map((pp, idx) => {
                                                     if (viewMode === 'boq') {
                                                         return (
@@ -1829,6 +2185,7 @@ export const ProjectDetails = () => {
                                                                 key={pp.plant_id}
                                                                 pp={pp}
                                                                 idx={idx}
+                                                                showCategory={category === null}
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
@@ -1842,6 +2199,7 @@ export const ProjectDetails = () => {
                                                                 key={pp.plant_id}
                                                                 pp={pp}
                                                                 idx={idx}
+                                                                showCategory={category === null}
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
@@ -1857,14 +2215,14 @@ export const ProjectDetails = () => {
                                     {viewMode === 'quotation' && filteredSorted.length > 0 && (
                                         <TableRow className="bg-muted/20 border-t border-border font-bold">
                                             <TableCell colSpan={5} className="text-right py-3 px-5 text-foreground font-bold">
-                                                Total Summary:
+                                                {filtersActive ? `Total of ${filteredSorted.length} shown:` : 'Total Summary:'}
                                             </TableCell>
                                             <TableCell className="text-center py-3 tabular-nums">
-                                                {totalQuotationQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                                {footerQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell colSpan={3}></TableCell>
                                             <TableCell className="text-center py-3 tabular-nums text-primary text-base">
-                                                {totalQuotationAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                {footerAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell></TableCell>
                                         </TableRow>
@@ -1872,62 +2230,12 @@ export const ProjectDetails = () => {
                                 </TableBody>
                             </Table>
                         </div>
+
+                        {filterSummary}
                     </>
                 ) : (
                     <>
-                        {/* ── Toolbar ── */}
-                        <div className="flex flex-row flex-wrap items-center gap-2 px-4 sm:px-5 py-3 border-b border-border bg-muted/20">
-                            {/* Search */}
-                            <div className="relative flex-1 min-w-[180px]">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                                <Input
-                                    placeholder="Search plants, notes…"
-                                    value={search}
-                                    onChange={e => setSearch(e.target.value)}
-                                    className="pl-8 h-8 text-sm bg-background w-full"
-                                />
-                            </div>
-
-                            {/* Filters Group: full width on phones so the category name isn't cut off */}
-                            <div className="flex items-center gap-2 w-full sm:w-auto">
-                                {/* Category filter */}
-                                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                                    <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-[170px] h-8 text-sm text-left bg-background">
-                                        <SelectValue placeholder="All categories" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="__all__">All categories</SelectItem>
-                                        {uniqueCategories.map(c => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-
-                                {/* List / card layout */}
-                                <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-background">
-                                    <Button
-                                        variant={standardLayout === 'list' ? 'secondary' : 'ghost'}
-                                        size="icon"
-                                        className="h-7 w-7"
-                                        onClick={() => changeStandardLayout('list')}
-                                        aria-pressed={standardLayout === 'list'}
-                                        title="List view"
-                                    >
-                                        <LayoutList className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button
-                                        variant={standardLayout === 'cards' ? 'secondary' : 'ghost'}
-                                        size="icon"
-                                        className="h-7 w-7"
-                                        onClick={() => changeStandardLayout('cards')}
-                                        aria-pressed={standardLayout === 'cards'}
-                                        title="Card view"
-                                    >
-                                        <LayoutGrid className="w-3.5 h-3.5" />
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
+                        {plantsToolbar}
 
                         {/* Select mode, for adding plants to another project (so it works on locked projects too) */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 sm:px-5 py-2.5 border-b border-border/60 text-xs">
@@ -1958,7 +2266,7 @@ export const ProjectDetails = () => {
 
                         {standardLayout === 'cards' ? (
                             filteredSorted.length === 0 ? (
-                                <p className="h-24 flex items-center justify-center text-sm text-muted-foreground">No plants match your search.</p>
+                                <p className="h-24 flex items-center justify-center text-sm text-muted-foreground">No plants match these filters.</p>
                             ) : (
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-3 sm:p-4">
                                     {filteredSorted.map((pp, idx) => (
@@ -1985,11 +2293,11 @@ export const ProjectDetails = () => {
                                     <TableRow className="bg-muted/30">
                                         <TableHead className="w-8 font-semibold text-center">#</TableHead>
                                         {selectMode && <TableHead className="w-10"><span className="sr-only">Selected</span></TableHead>}
-                                        <SortTh label="Plant" col="common_name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="pl-0" />
-                                        <SortTh label="Scientific" col="scientific_name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden sm:table-cell" />
-                                        <SortTh label="Category" col="category" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden md:table-cell" />
-                                        <SortTh label="Place" col="planting_place" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden lg:table-cell" />
-                                        <SortTh label="Notes" col="notes" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="hidden md:table-cell" />
+                                        <SortTh label="Plant" col="common_name" sort={sort} onSort={handleSort} className="pl-0" />
+                                        <SortTh label="Scientific" col="scientific_name" sort={sort} onSort={handleSort} className="hidden sm:table-cell" />
+                                        <SortTh label="Category" col="category" sort={sort} onSort={handleSort} className="hidden md:table-cell" />
+                                        <SortTh label="Place" col="planting_place" sort={sort} onSort={handleSort} className="hidden lg:table-cell" />
+                                        <SortTh label="Notes" col="notes" sort={sort} onSort={handleSort} className="hidden md:table-cell" />
                                         <TableHead className="text-right font-semibold w-20">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -1997,7 +2305,7 @@ export const ProjectDetails = () => {
                                     {filteredSorted.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={selectMode ? 8 : 7} className="h-24 text-center text-sm text-muted-foreground">
-                                                No plants match your search.
+                                                No plants match these filters.
                                             </TableCell>
                                         </TableRow>
                                     ) : (
@@ -2021,11 +2329,7 @@ export const ProjectDetails = () => {
                         </div>
                         )}
 
-                        {(search || categoryFilter !== '__all__') && (
-                            <p className="px-5 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
-                                Showing {filteredSorted.length} of {project.plants.length} plants
-                            </p>
-                        )}
+                        {filterSummary}
                     </>
                 )}
             </div>

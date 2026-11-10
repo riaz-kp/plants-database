@@ -28,16 +28,9 @@ export function AuthenticatedShell() {
 
                     <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
                         <Link to="/">
-                            <img
-                                src="/logo.svg"
-                                alt="Landschaft"
-                                className="w-7 h-7"
-                                style={{
-                                    filter: "brightness(0) saturate(100%) invert(18%) sepia(28%) saturate(1194%) hue-rotate(92deg) brightness(95%) contrast(90%)"
-                                }}
-                            />
+                            <img src="/logo-color.svg" alt="Landschaft" className="w-7 h-7" />
                         </Link>
-                        <Link to="/" className="font-medium text-base text-[#1F4D2E] tracking-tight">
+                        <Link to="/" className="wordmark text-base text-primary">
                             LANDSCHAFT
                         </Link>
                     </div>

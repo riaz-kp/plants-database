@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -41,72 +41,66 @@ async def _get_or_create_taxon(
     return taxon
 
 
-async def _find_existing_species_taxon(db: AsyncSession, row: dict) -> Optional[Taxon]:
-    hierarchy_ranks = [
-        Rank.KINGDOM,
-        Rank.DIVISION,
-        Rank.CLASS,
-        Rank.ORDER,
-        Rank.FAMILY,
-        Rank.GENUS,
-    ]
+_DUPLICATE_HIERARCHY = [Rank.KINGDOM, Rank.DIVISION, Rank.CLASS, Rank.ORDER, Rank.FAMILY, Rank.GENUS]
+
+
+def _find_existing_species_taxon_id(taxa: Dict[tuple, Any], row: dict) -> Optional[Any]:
+    """Walk the row's taxonomy columns down the existing tree; the species taxon's id, or None.
+    `taxa` maps (name, rank, parent_id) -> taxon id."""
     parent_id = None
-    for rank in hierarchy_ranks:
+    for rank in _DUPLICATE_HIERARCHY:
         name = row.get(rank.value.lower(), "")
         if not name:
             if rank == Rank.KINGDOM:
                 return None
             continue
-        stmt = select(Taxon).where(
-            Taxon.name == name,
-            Taxon.rank == rank,
-            Taxon.parent_id == parent_id,
-        )
-        res = await db.execute(stmt)
-        taxon = res.scalars().first()
-        if not taxon:
+        parent_id = taxa.get((name, rank, parent_id))
+        if parent_id is None:
             return None
-        parent_id = taxon.id
-        
     species_name = row.get("species", "")
     if not species_name:
         return None
-    stmt = select(Taxon).where(
-        Taxon.name == species_name,
-        Taxon.rank == Rank.SPECIES,
-        Taxon.parent_id == parent_id,
-    )
-    res = await db.execute(stmt)
-    return res.scalars().first()
+    return taxa.get((species_name, Rank.SPECIES, parent_id))
 
 
 async def find_duplicates_in_rows(db: AsyncSession, rows: list) -> list:
+    """Rows whose plant is already in the catalog: same species in the taxonomy tree,
+    else the same scientific name, else the same common name (case-insensitive).
+    The catalog is small, so it is loaded once instead of queried row by row."""
+    taxa: Dict[tuple, Any] = {}
+    for t_id, t_name, t_rank, t_parent in (
+        await db.execute(select(Taxon.id, Taxon.name, Taxon.rank, Taxon.parent_id))
+    ).all():
+        taxa.setdefault((t_name, t_rank, t_parent), t_id)
+
+    by_taxon: Dict[Any, Plant] = {}
+    by_scientific: Dict[str, Plant] = {}
+    by_common: Dict[str, Plant] = {}
+    for plant in (await db.execute(select(Plant))).scalars().all():
+        if plant.taxon_id:
+            by_taxon.setdefault(plant.taxon_id, plant)
+        if plant.scientific_name:
+            by_scientific.setdefault(plant.scientific_name.lower(), plant)
+        if plant.common_name:
+            by_common.setdefault(plant.common_name.lower(), plant)
+
     duplicates = []
     for idx, row in enumerate(rows, start=1):
-        species_taxon = await _find_existing_species_taxon(db, row)
-        existing_plant = None
-        if species_taxon:
-            plant_res = await db.execute(select(Plant).where(Plant.taxon_id == species_taxon.id))
-            existing_plant = plant_res.scalars().first()
-            
-        if not existing_plant:
-            scientific_name = row.get("scientific_name", "")
-            if scientific_name:
-                plant_res = await db.execute(select(Plant).where(func.lower(Plant.scientific_name) == scientific_name.lower()))
-                existing_plant = plant_res.scalars().first()
-                
-        if not existing_plant:
-            common_name = row.get("common_name", "")
-            if common_name:
-                plant_res = await db.execute(select(Plant).where(func.lower(Plant.common_name) == common_name.lower()))
-                existing_plant = plant_res.scalars().first()
-                
+        species_taxon_id = _find_existing_species_taxon_id(taxa, row)
+        existing_plant = by_taxon.get(species_taxon_id) if species_taxon_id else None
+        if not existing_plant and row.get("scientific_name", ""):
+            existing_plant = by_scientific.get(row["scientific_name"].lower())
+        if not existing_plant and row.get("common_name", ""):
+            existing_plant = by_common.get(row["common_name"].lower())
+
         if existing_plant:
             duplicates.append({
                 "row_index": idx - 1,  # 0-indexed for frontend array matching
                 "common_name": row.get("common_name", "") or existing_plant.common_name,
                 "scientific_name": row.get("scientific_name", "") or row.get("species", "") or existing_plant.scientific_name,
-                "existing_plant_id": str(existing_plant.id)
+                "existing_plant_id": str(existing_plant.id),
+                "existing_common_name": (existing_plant.common_name or "").strip(),
+                "existing_scientific_name": existing_plant.scientific_name,
             })
     return duplicates
 
@@ -234,8 +228,10 @@ async def _process_single_row(
     hierarchy_ranks,
     ignore_duplicates: bool = False,
     skip_ai: bool = False,
-) -> None:
-    """Shared logic: build taxonomy, AI-fill, upload images, create Plant."""
+) -> Optional[Tuple[Plant, bool]]:
+    """Shared logic: build taxonomy, AI-fill, upload images, create Plant.
+    Returns (plant, True) for a new plant, (existing plant, False) when the species
+    is already in the catalog and the row was skipped, or None when the row failed."""
     try:
         # 1. Taxonomy hierarchy
         parent_id = None
@@ -259,7 +255,7 @@ async def _process_single_row(
                 await db.execute(select(Plant).where(Plant.taxon_id == species_taxon.id))
             ).scalars().first()
             if existing:
-                return  # skip silently
+                return existing, False  # skip silently
 
         # 3. Text fields
         common_name = row.get("common_name", "")
@@ -363,10 +359,12 @@ async def _process_single_row(
         )
         db.add(plant)
         results["success"] += 1
+        return plant, True
 
     except Exception as exc:
         results["failed"] += 1
         results["errors"].append(f"Row {row_idx}: {exc}")
+        return None
 
 
 async def process_rows_import(

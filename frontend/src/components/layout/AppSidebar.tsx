@@ -1,70 +1,98 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import { LayoutDashboard, ListTree, Tags, Leaf, FolderKanban, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib-frontend/utils';
 
-const NAV_ITEMS = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/taxonomy', label: 'Taxonomy', icon: ListTree },
-    { to: '/categories', label: 'Categories', icon: Tags },
-    { to: '/plants', label: 'Plants', icon: Leaf },
-    { to: '/projects', label: 'Projects', icon: FolderKanban },
-];
+const NAV_GROUPS = [
+    {
+        label: null,
+        items: [
+            { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+            { to: '/projects', label: 'Projects', icon: FolderKanban },
+        ],
+    },
+    {
+        label: 'Catalog',
+        items: [
+            { to: '/plants', label: 'Plants', icon: Leaf },
+            { to: '/categories', label: 'Categories', icon: Tags },
+            { to: '/taxonomy', label: 'Taxonomy', icon: ListTree },
+        ],
+    },
+] as const;
 
 export function SidebarContent({ onClose }: { onClose?: () => void }) {
     const { logout } = useAuth();
     const navigate = useNavigate();
 
     return (
-        <div className="flex flex-col h-full bg-[#1F4D2E] text-white overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-5 h-16 shrink-0">
-                <img
-                    src="/logo.svg"
-                    alt="Landschaft"
-                    className="w-9 h-9 shrink-0"
-                    style={{ filter: 'brightness(0) invert(1) opacity(0.90)' }}
-                />
-                <span className="text-white font-semibold text-base tracking-wide uppercase">
-                    Landschaft
+        <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground overflow-hidden">
+            {/* Brand: the full-colour mark on a cream tile, as in the logo */}
+            <Link to="/" onClick={onClose} className="flex items-center gap-3 px-5 h-16 shrink-0">
+                <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-background shadow-sm shrink-0">
+                    <img src="/logo-color.svg" alt="" className="w-7 h-7" />
                 </span>
-            </div>
+                <span className="min-w-0">
+                    <span className="wordmark block text-[15px] leading-tight text-sidebar-active-foreground">
+                        Landschaft
+                    </span>
+                    <span className="block text-[11px] leading-tight text-sidebar-foreground/70">Plants Database</span>
+                </span>
+            </Link>
 
-            <Separator className="bg-white/10 mx-4" />
-
-            <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-                {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-                    <Link
-                        key={to}
-                        to={to}
-                        onClick={onClose}
-                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                        activeProps={{ className: 'bg-white text-[#1F4D2E]' }}
-                        inactiveProps={{ className: 'text-white/70 hover:text-white hover:bg-white/10' }}
-                    >
-                        <Icon className="w-4 h-4 shrink-0" />
-                        {label}
-                    </Link>
+            <nav className="flex-1 overflow-y-auto px-3 pt-4 pb-4 space-y-6 border-t border-white/[0.08]">
+                {NAV_GROUPS.map((group, i) => (
+                    <div key={i}>
+                        {group.label && (
+                            <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                                {group.label}
+                            </p>
+                        )}
+                        <div className="space-y-1">
+                            {group.items.map(({ to, label, icon: Icon }) => (
+                                <Link
+                                    key={to}
+                                    to={to}
+                                    onClick={onClose}
+                                    activeOptions={{ exact: to === '/' }}
+                                    className="group relative flex items-center gap-3 h-10 px-3 rounded-lg text-sm transition-colors"
+                                    activeProps={{ className: 'bg-sidebar-active text-sidebar-active-foreground font-medium' }}
+                                    inactiveProps={{ className: 'text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-active-foreground' }}
+                                >
+                                    {({ isActive }) => (
+                                        <>
+                                            {isActive && (
+                                                <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent" />
+                                            )}
+                                            <Icon
+                                                className={cn(
+                                                    'w-[18px] h-[18px] shrink-0 transition-colors',
+                                                    isActive ? 'text-accent' : 'text-sidebar-foreground/70 group-hover:text-sidebar-active-foreground',
+                                                )}
+                                            />
+                                            {label}
+                                        </>
+                                    )}
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
                 ))}
             </nav>
 
-            <Separator className="bg-white/10 mx-4" />
-
-            <div className="px-3 py-4 shrink-0">
+            <div className="px-3 pt-3 pb-4 border-t border-white/[0.08] shrink-0">
                 <button
                     onClick={() => {
                         logout();
                         onClose?.();
                         navigate({ to: '/login' });
                     }}
-                    className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    className="group flex w-full items-center gap-3 h-10 px-3 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-active-foreground transition-colors"
                 >
-                    <LogOut className="w-4 h-4 shrink-0" />
-                    Logout
+                    <LogOut className="w-[18px] h-[18px] shrink-0 text-sidebar-foreground/70 group-hover:text-sidebar-active-foreground transition-colors" />
+                    Log out
                 </button>
-            </div>
-
-            <div className="px-5 py-4 shrink-0">
-                <p className="text-white/30 text-xs lowercase">v1.0.0-beta</p>
+                <p className="px-3 mt-2 text-[11px] text-sidebar-foreground/40">v1.0.0-beta</p>
             </div>
         </div>
     );

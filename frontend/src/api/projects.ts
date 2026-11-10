@@ -1,5 +1,7 @@
 import { client } from "./client";
-import type { Project, ProjectCreate, ProjectPlantCreate, ProjectListResponse } from "../types/project";
+import type {
+    Project, ProjectCreate, ProjectPlantCreate, ProjectListResponse, PlantNameMatch, ProjectImportResult,
+} from "../types/project";
 
 export interface ShareLinkInfo {
     token: string;
@@ -30,6 +32,18 @@ export const projectsApi = {
 
     addPlantsBulk: async (projectId: string, plantIds: string[]): Promise<{ added: number; skipped: number }> => {
         const response = await client.post<{ added: number; skipped: number }>(`/projects/${projectId}/plants/bulk`, { plant_ids: plantIds });
+        return response.data;
+    },
+
+    /** Bulk import: which names are in the catalog, already in the project, or missing. Writes nothing. */
+    matchPlantNames: async (projectId: string, names: string[]): Promise<PlantNameMatch[]> => {
+        const response = await client.post<{ results: PlantNameMatch[] }>(`/projects/${projectId}/import/match`, { names });
+        return response.data.results;
+    },
+
+    /** Bulk import: create CSV rows' plants in the catalog (reusing existing ones) and add them to the project. */
+    importRows: async (projectId: string, rows: Record<string, string>[], skipAi = true): Promise<ProjectImportResult> => {
+        const response = await client.post<ProjectImportResult>(`/projects/${projectId}/import/rows`, rows, { params: { skip_ai: skipAi } });
         return response.data;
     },
 

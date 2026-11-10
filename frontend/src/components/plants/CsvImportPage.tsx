@@ -1,14 +1,18 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ioApi } from '../../api/io';
-import { aiApi } from '../../api/ai';
-import { plantsApi } from '../../api/plants';
 import { categoriesApi } from '../../api/categories';
 import { useAlert } from '../../contexts/AlertContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cleanPastedCsv } from './csvPaste';
+import { ImportProgressOverlay } from './ImportProgressOverlay';
+import { CsvRowsTable } from './CsvRowsTable';
+import {
+    blankCsvRow, buildBulkImportPrompt, DEFAULT_CATEGORY_LIST, errorMessage, prepareImportRow, rowName, useImportClock,
+    type ImportJob,
+} from './plantImport';
 import {
     Dialog,
     DialogContent,
@@ -19,387 +23,13 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '../../lib-frontend/utils';
 import {
-    ArrowLeft, Upload, FileUp, Loader2, Trash2, Plus,
-    AlertCircle, ChevronRight, Info, X, ImageOff, RefreshCw, Maximize2,
-    Copy, Check, Sparkles, AlertTriangle, CheckCircle2, XCircle, Circle, MinusCircle,
-    ClipboardPaste,
+    ArrowLeft, Upload, FileUp, Loader2, Plus,
+    AlertCircle, ChevronRight, Info,
+    Copy, Check, Sparkles, AlertTriangle, ClipboardPaste,
 } from 'lucide-react';
-
-// ── Field config ─────────────────────────────────────────────────────────────
-const ALL_FIELDS: { key: string; label: string; width: string; required?: boolean; isImage?: boolean; isSticky?: boolean }[] = [
-    { key: 'common_name', label: 'Common Name', width: '160px', required: true, isSticky: true },
-    { key: 'scientific_name', label: 'Scientific Name', width: '160px' },
-    { key: 'category', label: 'Category', width: '120px' },
-    { key: 'planting_place', label: 'Planting Place', width: '130px' },
-    { key: 'kingdom', label: 'Kingdom', width: '110px', required: true },
-    { key: 'division', label: 'Division', width: '110px' },
-    { key: 'class', label: 'Class', width: '110px' },
-    { key: 'order', label: 'Order', width: '110px' },
-    { key: 'family', label: 'Family', width: '110px' },
-    { key: 'genus', label: 'Genus', width: '110px' },
-    { key: 'species', label: 'Species', width: '110px', required: true },
-    { key: 'description', label: 'Description', width: '200px' },
-    { key: 'common_diseases', label: 'Diseases', width: '180px' },
-    { key: 'care_water', label: 'Water', width: '140px' },
-    { key: 'care_sunlight', label: 'Sunlight', width: '140px' },
-    { key: 'care_soil', label: 'Soil', width: '140px' },
-    { key: 'care_maintenance', label: 'Maintenance', width: '140px' },
-    { key: 'icon_url', label: 'Icon URL', width: '320px', isImage: true },
-    { key: 'image_url', label: 'Image URL', width: '320px', isImage: true },
-];
-
-const BLANK_ROW = (): Record<string, string> =>
-    Object.fromEntries(ALL_FIELDS.map(f => [f.key, '']));
 
 type Stage = 'upload' | 'edit';
 const PASTED_NAME = 'Pasted CSV';
-
-// ── Step-by-step import (one plant per request, so progress is real and
-//    long imports never hit a single request timeout) ─────────────────────────
-const TEXT_FIELDS = ['description', 'common_diseases', 'care_water', 'care_sunlight', 'care_soil', 'care_maintenance'];
-
-const IMPORT_STEPS = {
-    ai: 'Generating missing details with AI',
-    find: 'Finding plant images',
-    icon: 'Uploading icon image',
-    image: 'Uploading main image',
-    save: 'Saving to catalog',
-} as const;
-type ImportStep = keyof typeof IMPORT_STEPS;
-const STEP_ORDER = Object.keys(IMPORT_STEPS) as ImportStep[];
-
-type JobStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
-
-interface ImportJob {
-    name: string;
-    status: JobStatus;
-    step?: ImportStep;
-    message?: string;
-    warnings: string[];
-}
-
-const firstHttpsUrl = (raw: string | undefined) => raw?.match(/https:\/\/[^\s)\]',"]+/)?.[0] ?? '';
-const isCloudinaryUrl = (url: string) => url.includes('res.cloudinary.com');
-const errorMessage = (err: any) => {
-    const detail = err?.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return detail?.message || err?.message || 'Unknown error';
-};
-
-// ── Import progress overlay ───────────────────────────────────────────────────
-const ImportProgressOverlay = ({
-    jobs,
-    running,
-    stopRequested,
-    elapsedSeconds,
-    onStop,
-    onEditRemaining,
-    onDone,
-}: {
-    jobs: ImportJob[];
-    running: boolean;
-    stopRequested: boolean;
-    elapsedSeconds: number;
-    onStop: () => void;
-    onEditRemaining: () => void;
-    onDone: () => void;
-}) => {
-    const total = jobs.length;
-    const finished = jobs.filter(j => j.status === 'done' || j.status === 'skipped' || j.status === 'failed').length;
-    const current = jobs.find(j => j.status === 'running');
-    const stepFraction = current?.step ? STEP_ORDER.indexOf(current.step) / STEP_ORDER.length : 0;
-    const percent = total ? Math.round(((finished + stepFraction) / total) * 100) : 0;
-    const counts = {
-        done: jobs.filter(j => j.status === 'done').length,
-        skipped: jobs.filter(j => j.status === 'skipped').length,
-        failed: jobs.filter(j => j.status === 'failed').length,
-        pending: jobs.filter(j => j.status === 'pending').length,
-    };
-    const listRef = useRef<HTMLDivElement>(null);
-    const currentIdx = jobs.findIndex(j => j.status === 'running');
-
-    // Keep the plant being processed in view
-    useEffect(() => {
-        if (currentIdx < 0) return;
-        listRef.current?.querySelector(`[data-job="${currentIdx}"]`)?.scrollIntoView({ block: 'nearest' });
-    }, [currentIdx]);
-
-    const elapsed = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="import-progress-title">
-            <div className="w-full max-w-xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-                {/* Header + bar */}
-                <div className="px-5 pt-5 pb-4 border-b border-border space-y-3">
-                    <div className="flex items-baseline justify-between gap-3">
-                        <h2 id="import-progress-title" className="text-base font-semibold text-foreground">
-                            {running ? 'Importing plants…' : stopRequested && counts.pending ? 'Import stopped' : 'Import finished'}
-                        </h2>
-                        <span className="text-sm font-semibold tabular-nums text-foreground">
-                            {finished} / {total}
-                            <span className="ml-2 text-xs font-normal text-muted-foreground">{elapsed}</span>
-                        </span>
-                    </div>
-                    <div
-                        className="h-2.5 w-full rounded-full bg-muted overflow-hidden"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={percent}
-                    >
-                        <div
-                            className={cn('h-full rounded-full transition-[width] duration-500', counts.failed ? 'bg-amber-500' : 'bg-primary')}
-                            style={{ width: `${percent}%` }}
-                        />
-                    </div>
-                    <p className="text-xs text-muted-foreground min-h-[1rem]" aria-live="polite">
-                        {current ? (
-                            <>
-                                <span className="font-semibold text-foreground">{current.name}</span>
-                                {' — '}{current.step ? IMPORT_STEPS[current.step] : 'Starting'}…
-                            </>
-                        ) : running ? 'Preparing…' : (
-                            <>
-                                {counts.done} added
-                                {counts.skipped > 0 && ` · ${counts.skipped} skipped`}
-                                {counts.failed > 0 && ` · ${counts.failed} failed`}
-                                {counts.pending > 0 && ` · ${counts.pending} not imported`}
-                            </>
-                        )}
-                    </p>
-                </div>
-
-                {/* Per-plant list */}
-                <div ref={listRef} className="flex-1 overflow-y-auto divide-y divide-border/60">
-                    {jobs.map((job, i) => (
-                        <div key={i} data-job={i} className={cn('flex items-start gap-3 px-5 py-2.5', job.status === 'running' && 'bg-primary/5')}>
-                            <div className="mt-0.5 shrink-0">
-                                {job.status === 'running' && <Loader2 size={15} className="animate-spin text-primary" />}
-                                {job.status === 'done' && (job.warnings.length
-                                    ? <AlertTriangle size={15} className="text-amber-500" />
-                                    : <CheckCircle2 size={15} className="text-emerald-600" />)}
-                                {job.status === 'skipped' && <MinusCircle size={15} className="text-muted-foreground" />}
-                                {job.status === 'failed' && <XCircle size={15} className="text-red-500" />}
-                                {job.status === 'pending' && <Circle size={15} className="text-muted-foreground/30" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className={cn('text-sm truncate', job.status === 'pending' ? 'text-muted-foreground' : 'text-foreground font-medium')}>
-                                    {job.name || `Row ${i + 1}`}
-                                </p>
-                                <p className={cn('text-[11px] leading-snug', job.status === 'failed' ? 'text-red-600' : 'text-muted-foreground')}>
-                                    {job.status === 'running' && (job.step ? IMPORT_STEPS[job.step] : 'Starting')}
-                                    {job.status === 'pending' && (stopRequested && !running ? 'Not imported (stopped)' : 'Waiting')}
-                                    {job.status === 'done' && 'Added to catalog'}
-                                    {job.status === 'skipped' && (job.message || 'Skipped')}
-                                    {job.status === 'failed' && (job.message || 'Failed')}
-                                    {job.warnings.length > 0 && ` · ${job.warnings.join(' · ')}`}
-                                </p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Footer */}
-                <div className="px-5 py-3 border-t border-border bg-muted/20 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
-                    {running ? (
-                        <>
-                            <p className="text-[11px] text-muted-foreground">
-                                Keep this tab open. Plants are saved one by one as they finish.
-                            </p>
-                            <Button variant="outline" size="sm" onClick={onStop} disabled={stopRequested} className="h-8 text-xs">
-                                {stopRequested ? 'Stopping after this plant…' : 'Stop after this plant'}
-                            </Button>
-                        </>
-                    ) : (
-                        <>
-                            <span />
-                            <div className="flex gap-2">
-                                {(counts.failed > 0 || counts.pending > 0) && (
-                                    <Button variant="outline" size="sm" onClick={onEditRemaining} className="h-8 text-xs">
-                                        Edit {counts.failed + counts.pending} remaining row(s)
-                                    </Button>
-                                )}
-                                <Button size="sm" onClick={onDone} className="h-8 text-xs">
-                                    Go to catalog
-                                </Button>
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// ── Inline image thumbnail cell ───────────────────────────────────────────────
-const ImageCell = ({
-    url,
-    fieldKey,
-    rowIdx,
-    plantName,
-    onChange,
-    onZoom,
-    onRegenerate,
-    isRegenerating,
-}: {
-    url: string;
-    fieldKey: string;
-    rowIdx: number;
-    plantName: string;
-    onChange: (rowIdx: number, key: string, val: string) => void;
-    onZoom: (data: { url: string; label: string; rowIdx: number; fieldKey: string; plantName: string }) => void;
-    onRegenerate: (rowIdx: number, fieldKey: string, plantName: string) => Promise<void>;
-    isRegenerating: boolean;
-}) => {
-    const [imgError, setImgError] = useState(false);
-    const hasUrl = url.trim().startsWith('http');
-    const label = fieldKey === 'icon_url' ? 'Icon' : 'Image';
-
-    const handleUrlChange = (val: string) => {
-        setImgError(false);
-        onChange(rowIdx, fieldKey, val);
-    };
-
-    // Reset error state when URL changes externally (e.g. via regeneration)
-    useEffect(() => {
-        setImgError(false);
-    }, [url]);
-
-    return (
-        <div className="flex h-[80px] w-full items-stretch">
-            {/* Thumbnail - Square Crop */}
-            <div
-                className={cn(
-                    "relative w-20 h-20 shrink-0 bg-muted/20 border-r border-border/40 overflow-hidden group/img transition-all",
-                    hasUrl && !imgError ? "cursor-zoom-in" : ""
-                )}
-                onClick={() => {
-                    if (hasUrl && !imgError) {
-                        onZoom({ url, label, rowIdx, fieldKey, plantName });
-                    }
-                }}
-            >
-                {hasUrl && !imgError ? (
-                    <>
-                        <img
-                            src={url}
-                            alt=""
-                            onError={() => setImgError(true)}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover/img:scale-110"
-                        />
-                        {/* Zoom hint overlay */}
-                        <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors flex items-center justify-center">
-                            <Maximize2
-                                size={18}
-                                className="text-white opacity-0 group-hover/img:opacity-100 transition-all scale-75 group-hover/img:scale-100 drop-shadow-lg"
-                            />
-                        </div>
-                    </>
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                        {hasUrl && imgError
-                            ? <ImageOff size={16} className="text-red-400" />
-                            : <div className="w-5 h-5 rounded-full bg-muted-foreground/10 border border-border/40" />
-                        }
-                    </div>
-                )}
-
-                {/* Regenerate button - Float it over the top-right */}
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onRegenerate(rowIdx, fieldKey, plantName);
-                    }}
-                    disabled={isRegenerating || !plantName.trim()}
-                    className={cn(
-                        'absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded-lg transition-all shadow-md backdrop-blur-md z-10',
-                        'bg-black/60 hover:bg-primary text-white',
-                        'disabled:opacity-20 disabled:cursor-not-allowed'
-                    )}
-                    title="Fetch new image"
-                >
-                    {isRegenerating ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                </button>
-            </div>
-
-            {/* URL input */}
-            <div className="flex-1 min-w-0">
-                <textarea
-                    value={url}
-                    onChange={e => handleUrlChange(e.target.value)}
-                    className={cn(
-                        'w-full h-full px-2 py-2 text-[11px] bg-transparent resize-none leading-relaxed',
-                        'focus:outline-none focus:ring-1 focus:ring-primary/40 focus:bg-primary/3',
-                        'placeholder:text-muted-foreground/20 transition-colors'
-                    )}
-                    placeholder="https://…"
-                />
-            </div>
-        </div>
-    );
-};
-
-// ── Lightbox overlay ──────────────────────────────────────────────────────────
-// ── Lightbox overlay ──────────────────────────────────────────────────────────
-const Lightbox = ({
-    url,
-    label,
-    onClose,
-    onRegenerate,
-    isRegenerating,
-}: {
-    url: string;
-    label: string;
-    onClose: () => void;
-    onRegenerate?: () => Promise<void>;
-    isRegenerating?: boolean;
-}) => (
-    <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8"
-        onClick={onClose}
-    >
-        <div
-            className="relative max-w-4xl w-full max-h-full flex flex-col gap-4"
-            onClick={e => e.stopPropagation()}
-        >
-            <div className="bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-                <div className="px-5 py-4 bg-muted/40 border-b border-border/40 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <span className="text-[12px] font-bold text-muted-foreground uppercase tracking-widest">{label}</span>
-                        {onRegenerate && (
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={onRegenerate}
-                                disabled={isRegenerating}
-                                className="h-7 px-3 text-[10px] gap-2 rounded-lg bg-white shadow-sm hover:bg-primary hover:text-white border-primary/20 transition-all font-bold"
-                            >
-                                {isRegenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                REGENERATE
-                            </Button>
-                        )}
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="w-8 h-8 flex items-center justify-center rounded-xl bg-muted/50 text-foreground hover:bg-red-50 hover:text-red-500 transition-all"
-                    >
-                        <X size={16} />
-                    </button>
-                </div>
-                <div className="bg-muted/10 p-2 min-h-[40vh] flex items-center justify-center">
-                    <img
-                        src={url}
-                        alt={label}
-                        className="max-w-full max-h-[65vh] object-contain rounded-lg shadow-lg"
-                    />
-                </div>
-                <div className="px-5 py-3 bg-white border-t border-border/40 overflow-hidden">
-                    <p className="text-[11px] font-mono text-muted-foreground/60 break-all select-all">{url}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-);
 
 export const CsvImportPage = () => {
     const navigate = useNavigate();
@@ -420,27 +50,11 @@ export const CsvImportPage = () => {
     const { data: categoriesOptions } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.getAll() });
 
     const categoriesList = useMemo(() => {
-        if (!categoriesOptions || categoriesOptions.items.length === 0) return "Tree, Shrub, Palm, Creeper, Groundcover, Climber, Fern, Grass, Succulent, Aquatic, Other";
+        if (!categoriesOptions || categoriesOptions.items.length === 0) return DEFAULT_CATEGORY_LIST;
         return categoriesOptions.items.map(c => c.name).join(", ");
     }, [categoriesOptions]);
 
-    const bulkImportPrompt = useMemo(() => `Act as a botanical data expert. 
-
-Task: Generate a perfectly formatted CSV file for the plants listed below.
-
-Header (MUST be the first line of your response):
-kingdom,division,class,order,family,genus,species,common_name,scientific_name,category,planting_place,description,common_diseases,care_water,care_sunlight,care_soil,care_maintenance,icon_url,image_url
-
-Strict Requirements (CRITICAL):
-1. MANDATORY FIELDS: Every single column must have a value. DO NOT skip any columns.
-2. SPECIES COLUMN: This is the specific epithet (the second word of the scientific name). For example, if the scientific name is "Psidium guajava", the species is "guajava". DO NOT leave the species column blank.
-3. CATEGORY: MUST be exactly one of [${categoriesList}].
-4. PLACE: MUST be exactly one of [Indoor, Outdoor, Indoor & Outdoor].
-5. IMAGES: Use Wikimedia Special:FilePath URLs based on the scientific name (e.g. .../Special:FilePath/Scientific_Name.jpg?width=1000).
-6. FORMATTING: Raw CSV text only. No markdown blocks (no \` \` \`), no explanations, no "Here is your CSV".
-
-List of Plants to Process:
-[PASTE YOUR PLANT NAMES HERE]`, [categoriesList]);
+    const bulkImportPrompt = useMemo(() => buildBulkImportPrompt(categoriesList), [categoriesList]);
 
     const handleCopyPrompt = () => {
         navigator.clipboard.writeText(bulkImportPrompt);
@@ -449,18 +63,8 @@ List of Plants to Process:
     };
 
     // The editable rows
-    const [rows, setRows] = useState<Record<string, string>[]>([BLANK_ROW()]);
+    const [rows, setRows] = useState<Record<string, string>[]>([blankCsvRow()]);
 
-    // Lightbox & Regeneration state
-    const [lightbox, setLightbox] = useState<{
-        url: string;
-        label: string;
-        rowIdx: number;
-        fieldKey: string;
-        plantName: string;
-    } | null>(null);
-    const [isRegenerating, setIsRegenerating] = useState<Record<string, boolean>>({});
-    const [regeneratePages, setRegeneratePages] = useState<Record<string, number>>({});
     const [duplicateImportData, setDuplicateImportData] = useState<{
         duplicates: Array<{
             row_index: number;
@@ -470,36 +74,6 @@ List of Plants to Process:
         }>;
         rowsToImport: Record<string, string>[];
     } | null>(null);
-
-    const handleRegenerate = async (rowIdx: number, fieldKey: string, plantName: string) => {
-        const searchName = plantName.trim();
-        if (!searchName) return;
-
-        const key = `${rowIdx}_${fieldKey}`;
-        setIsRegenerating(prev => ({ ...prev, [key]: true }));
-
-        try {
-            const currentPage = regeneratePages[key] || 1;
-            const nextPage = currentPage + 1;
-
-            const data = await aiApi.fetchPlantImages({ plantName: searchName, page: nextPage });
-
-            setRegeneratePages(prev => ({ ...prev, [key]: data.page }));
-
-            const newUrl = fieldKey === 'icon_url' ? data.icon_url : data.image_url;
-            if (newUrl) {
-                updateCell(rowIdx, fieldKey, newUrl);
-                // If lightbox is open for this cell, update it too
-                if (lightbox && lightbox.rowIdx === rowIdx && lightbox.fieldKey === fieldKey) {
-                    setLightbox(prev => prev ? { ...prev, url: newUrl } : null);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to regenerate image:', error);
-        } finally {
-            setIsRegenerating(prev => ({ ...prev, [key]: false }));
-        }
-    };
 
     // ── File handling ──────────────────────────────────────────────────────
     const processFile = useCallback(async (file: File, displayName?: string) => {
@@ -512,7 +86,7 @@ List of Plants to Process:
             const result = await ioApi.previewCsv(file);
             setFileName(displayName ?? file.name);
             setParseErrors(result.errors);
-            setRows(result.rows.length > 0 ? result.rows : [BLANK_ROW()]);
+            setRows(result.rows.length > 0 ? result.rows : [blankCsvRow()]);
             setStage('edit');
         } catch (err: any) {
             showAlert('Could not parse CSV: ' + (err.response?.data?.detail || err.message), 'error');
@@ -558,10 +132,10 @@ List of Plants to Process:
         setRows(prev => prev.map((r, i) => i === rowIdx ? { ...r, [key]: value } : r));
     };
 
-    const addRow = () => setRows(prev => [...prev, BLANK_ROW()]);
+    const addRow = () => setRows(prev => [...prev, blankCsvRow()]);
 
     const deleteRow = (idx: number) =>
-        setRows(prev => prev.length === 1 ? [BLANK_ROW()] : prev.filter((_, i) => i !== idx));
+        setRows(prev => prev.length === 1 ? [blankCsvRow()] : prev.filter((_, i) => i !== idx));
 
     // ── Import ────────────────────────────────────────────────────────────
     const [importJobs, setImportJobs] = useState<ImportJob[] | null>(null);
@@ -569,95 +143,15 @@ List of Plants to Process:
     const [importRunning, setImportRunning] = useState(false);
     const [stopRequested, setStopRequested] = useState(false);
     const stopRef = useRef(false);
-    const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-    useEffect(() => {
-        if (!importRunning) return;
-        const started = Date.now() - elapsedSeconds * 1000;
-        const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
-        // Leaving mid-import would silently drop the remaining plants
-        const warnOnLeave = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-        window.addEventListener('beforeunload', warnOnLeave);
-        return () => { clearInterval(timer); window.removeEventListener('beforeunload', warnOnLeave); };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [importRunning]);
-
-    /** AI-fill blank text, find missing images and upload them, reporting each step. */
-    const prepareRow = async (
-        source: Record<string, string>,
-        onStep: (step: ImportStep) => void,
-        warn: (msg: string) => void,
-    ): Promise<Record<string, string>> => {
-        const row = { ...source };
-        const scientific = row.scientific_name?.trim() || [row.genus, row.species].filter(Boolean).join(' ').trim();
-        const common = row.common_name?.trim();
-
-        if (TEXT_FIELDS.some(f => !row[f]?.trim())) {
-            onStep('ai');
-            try {
-                const ai = await aiApi.generatePlantDetails({
-                    commonName: common || undefined,
-                    scientificName: scientific || undefined,
-                    categories: categoriesOptions?.items?.map(c => c.name),
-                });
-                const filled: Record<string, string | undefined> = {
-                    description: ai.description,
-                    common_diseases: ai.common_diseases,
-                    care_water: ai.care_data?.water,
-                    care_sunlight: ai.care_data?.sunlight,
-                    care_soil: ai.care_data?.soil,
-                    care_maintenance: ai.care_data?.maintenance,
-                };
-                for (const f of TEXT_FIELDS) {
-                    if (!row[f]?.trim() && filled[f]) row[f] = filled[f]!;
-                }
-            } catch {
-                warn('AI details unavailable');
-            }
-        }
-
-        row.icon_url = firstHttpsUrl(row.icon_url);
-        row.image_url = firstHttpsUrl(row.image_url);
-        if (!row.icon_url || !row.image_url) {
-            onStep('find');
-            try {
-                const found = await aiApi.fetchPlantImages({ plantName: scientific || common });
-                if (!row.icon_url && found.icon_url) row.icon_url = found.icon_url;
-                if (!row.image_url && found.image_url) row.image_url = found.image_url;
-            } catch {
-                /* no images found — the plant is still imported without them */
-            }
-        }
-
-        for (const [field, step, label] of [
-            ['icon_url', 'icon', 'icon'],
-            ['image_url', 'image', 'main image'],
-        ] as const) {
-            if (!row[field]) {
-                warn(`no ${label}`);
-                continue;
-            }
-            if (isCloudinaryUrl(row[field])) continue;
-            onStep(step);
-            try {
-                const uploaded = await plantsApi.uploadImageFromUrl(row[field], field === 'icon_url' ? 'icon' : 'image');
-                row[field] = uploaded.url;
-            } catch {
-                warn(`${label} upload failed`);
-                row[field] = '';
-            }
-        }
-        return row;
-    };
+    const elapsedSeconds = useImportClock(importRunning);
 
     const runImport = async (rowsToImport: Record<string, string>[], ignoreDuplicates: boolean) => {
         stopRef.current = false;
         setStopRequested(false);
-        setElapsedSeconds(0);
         setDuplicateImportData(null);
         setImportRows(rowsToImport);
         setImportJobs(rowsToImport.map(r => ({
-            name: r.common_name?.trim() || r.scientific_name?.trim() || r.species?.trim() || '',
+            name: rowName(r),
             status: 'pending',
             warnings: [],
         })));
@@ -673,8 +167,9 @@ List of Plants to Process:
 
             update({ status: 'running' });
             try {
-                const row = await prepareRow(
+                const row = await prepareImportRow(
                     rowsToImport[i],
+                    categoriesOptions?.items?.map(c => c.name),
                     step => update({ step }),
                     msg => update(job => ({ warnings: [...job.warnings, msg] })),
                 );
@@ -732,22 +227,13 @@ List of Plants to Process:
             const status = importJobs?.[i]?.status;
             return status === 'failed' || status === 'pending';
         });
-        setRows(remaining.length > 0 ? remaining : [BLANK_ROW()]);
+        setRows(remaining.length > 0 ? remaining : [blankCsvRow()]);
         setImportJobs(null);
     };
 
     // ── Render ────────────────────────────────────────────────────────────
     return (
         <>
-            {/* ── Lightbox ──────────────────────────────────────────────── */}
-            {lightbox && (
-                <Lightbox
-                    url={lightbox.url}
-                    label={lightbox.label}
-                    onClose={() => setLightbox(null)}
-                />
-            )}
-
             <div className="flex flex-col h-full min-h-[calc(100vh-8rem)]">
 
                 {/* ── Page header ─────────────────────────────────────────── */}
@@ -984,100 +470,12 @@ List of Plants to Process:
                         </div>
 
                         {/* Spreadsheet */}
-                        <div className="flex-1 min-h-0 rounded-xl border border-border overflow-hidden shadow-sm bg-white">
-                            <div className="overflow-auto h-full max-h-[calc(100vh-18rem)] overscroll-behavior-x-contain">
-                                <table className="border-collapse text-xs" style={{ width: 'max-content', minWidth: '100%' }}>
-                                    <thead className="sticky top-0 z-20 bg-muted shadow-sm">
-                                        <tr>
-                                            {/* Row number */}
-                                            <th className="w-9 min-w-[36px] text-center text-[10px] font-bold text-muted-foreground/60 border-b border-r border-border px-1 py-2 bg-muted md:sticky md:left-0 z-30">
-                                                #
-                                            </th>
-                                            {ALL_FIELDS.map(f => (
-                                                <th
-                                                    key={f.key}
-                                                    className={cn(
-                                                        "text-left px-2 py-2 border-b border-r border-border font-bold text-[10px] uppercase tracking-wider text-muted-foreground whitespace-nowrap",
-                                                        f.isSticky ? "md:sticky md:left-[36px] z-40 bg-muted" : "z-20"
-                                                    )}
-                                                    style={{ minWidth: f.width }}
-                                                >
-                                                    {f.label}
-                                                    {f.required && <span className="text-red-400 ml-0.5">*</span>}
-                                                </th>
-                                            ))}
-                                            {/* Delete col */}
-                                            <th className="w-9 border-b border-border bg-muted" />
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {rows.map((row, rowIdx) => {
-                                            const isEmpty = !row.common_name?.trim() && !row.species?.trim();
-                                            return (
-                                                <tr
-                                                    key={rowIdx}
-                                                    className={cn(
-                                                        'group',
-                                                        rowIdx % 2 === 0 ? 'bg-white' : 'bg-[#f9fafb]',
-                                                        isEmpty ? 'opacity-50' : ''
-                                                    )}
-                                                >
-                                                    {/* Row num */}
-                                                    <td className={cn(
-                                                        "text-center text-[10px] text-muted-foreground/40 tabular-nums border-r border-b border-border px-1 md:sticky md:left-0 z-10 align-top pt-2",
-                                                        rowIdx % 2 === 0 ? "bg-white" : "bg-[#f9fafb]"
-                                                    )}>
-                                                        {rowIdx + 1}
-                                                    </td>
-                                                    {ALL_FIELDS.map(f => (
-                                                        <td key={f.key} className={cn(
-                                                            "border-r border-b border-border p-0 align-top",
-                                                            f.isSticky ? (rowIdx % 2 === 0 ? "md:sticky md:left-[36px] z-10 bg-white" : "md:sticky md:left-[36px] z-10 bg-[#f9fafb]") : ""
-                                                        )}>
-                                                            {f.isImage ? (
-                                                                <ImageCell
-                                                                    url={row[f.key] ?? ''}
-                                                                    fieldKey={f.key}
-                                                                    rowIdx={rowIdx}
-                                                                    plantName={row.common_name || row.scientific_name || ''}
-                                                                    onChange={updateCell}
-                                                                    onZoom={setLightbox}
-                                                                    onRegenerate={handleRegenerate}
-                                                                    isRegenerating={!!isRegenerating[`${rowIdx}_${f.key}`]}
-                                                                />
-                                                            ) : (
-                                                                <textarea
-                                                                    value={row[f.key] ?? ''}
-                                                                    onChange={e => updateCell(rowIdx, f.key, e.target.value)}
-                                                                    rows={1}
-                                                                    className={cn(
-                                                                        'w-full h-full min-h-[32px] px-2 py-1.5 text-xs bg-transparent resize-none p-2',
-                                                                        'focus:outline-none focus:ring-1 focus:ring-primary/40 focus:bg-primary/3',
-                                                                        'placeholder:text-muted-foreground/30 transition-colors'
-                                                                    )}
-                                                                    style={{ minWidth: f.width, height: f.isImage ? '80px' : 'auto', minHeight: '80px' }}
-                                                                    placeholder={f.required ? '(required)' : ''}
-                                                                />
-                                                            )}
-                                                        </td>
-                                                    ))}
-                                                    {/* Delete */}
-                                                    <td className="border-b border-border p-0 text-center align-top pt-2">
-                                                        <button
-                                                            onClick={() => deleteRow(rowIdx)}
-                                                            className="p-1.5 text-muted-foreground/40 hover:text-red-500 transition-colors"
-                                                            title="Remove row"
-                                                        >
-                                                            <Trash2 size={13} />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                        <CsvRowsTable
+                            rows={rows}
+                            onCellChange={updateCell}
+                            onDeleteRow={deleteRow}
+                            className="flex-1 min-h-0 max-h-[calc(100vh-18rem)]"
+                        />
 
                         {/* Footer hint */}
                         <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
@@ -1087,15 +485,6 @@ List of Plants to Process:
                         </p>
                     </div>
                 )}
-                {lightbox && (
-                    <Lightbox
-                        {...lightbox}
-                        onClose={() => setLightbox(null)}
-                        onRegenerate={() => handleRegenerate(lightbox.rowIdx, lightbox.fieldKey, lightbox.plantName)}
-                        isRegenerating={!!isRegenerating[`${lightbox.rowIdx}_${lightbox.fieldKey}`]}
-                    />
-                )}
-
                 {/* ── Import progress ─────────────────────────────────────────── */}
                 {importJobs && (
                     <ImportProgressOverlay
