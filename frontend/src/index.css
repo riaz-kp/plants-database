@@ -5,50 +5,51 @@
 
 @layer base {
   :root {
-    /* Forest Green / Sage / Beige palette */
-    --background: 40 30% 95%;
-    /* warm cream #f4f0ea */
-    --foreground: 120 20% 14%;
-    /* near-black forest #1c2a1a */
+    /* Landschaft palette, taken from the logo:
+       forest #1B3B2B · sage #758C73 · sand #C8B8A2 · cream #F7F3EB */
+    --background: 40 38% 96%;
+    /* cream #f9f6f1 */
+    --foreground: 150 24% 13%;
+    /* forest ink #19291f */
 
     --card: 0 0% 100%;
-    --card-foreground: 120 20% 14%;
+    --card-foreground: 150 24% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 120 20% 14%;
+    --popover-foreground: 150 24% 13%;
 
-    --primary: 116 37% 26%;
-    /* dark forest green #2d5a27 */
-    --primary-foreground: 40 30% 95%;
+    --primary: 150 36% 21%;
+    /* forest #224936 */
+    --primary-foreground: 40 38% 96%;
 
-    --secondary: 110 20% 57%;
-    /* sage green #8aa87f */
-    --secondary-foreground: 120 20% 14%;
+    --secondary: 112 13% 51%;
+    /* sage #769272 */
+    --secondary-foreground: 150 24% 13%;
 
-    --muted: 38 22% 88%;
-    /* warm beige #e4ddd1 */
-    --muted-foreground: 120 10% 42%;
+    --muted: 38 28% 91%;
+    /* sand tint #ede8df */
+    --muted-foreground: 150 9% 38%;
 
-    --accent: 35 30% 67%;
-    /* warm tan #c4a97a */
-    --accent-foreground: 120 20% 14%;
+    --accent: 35 26% 70%;
+    /* sand #c9b9a3 */
+    --accent-foreground: 150 24% 13%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 38 22% 84%;
-    --input: 38 22% 84%;
-    --ring: 116 37% 26%;
+    --border: 38 24% 86%;
+    --input: 38 24% 86%;
+    --ring: 150 36% 21%;
 
     --radius: 0.625rem;
 
-    /* Sidebar tokens */
-    --sidebar: 116 37% 22%;
-    /* deep forest #24491e */
-    --sidebar-foreground: 110 20% 80%;
-    --sidebar-hover: 116 37% 28%;
-    --sidebar-active: 40 30% 95%;
-    --sidebar-active-foreground: 116 37% 22%;
+    /* Sidebar: the logo's forest green */
+    --sidebar: 150 37% 17%;
+    /* #1b3b2b */
+    --sidebar-foreground: 140 10% 74%;
+    --sidebar-hover: 150 30% 21%;
+    --sidebar-active: 150 26% 25%;
+    --sidebar-active-foreground: 40 38% 96%;
   }
 
   * {
