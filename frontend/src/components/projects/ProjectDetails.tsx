@@ -67,25 +67,30 @@ type RowFilter = 'all' | 'incomplete' | 'complete' | 'no_quantity' | 'no_unit' |
 const DEFAULT_SORT: PlantSort = { key: 'common_name', dir: 'asc' };
 const NUMERIC_SORT_KEYS: SortKey[] = ['quantity', 'rate', 'amount'];
 
-/** The sort keys each view can use (BOQ / quotation rows are already grouped by category) */
+/** The sort keys each view can use */
 const VIEW_SORT_KEYS: Record<ViewMode, SortKey[]> = {
     standard: ['added_at', 'common_name', 'scientific_name', 'category', 'planting_place', 'notes'],
-    boq: ['added_at', 'common_name', 'scientific_name', 'quantity'],
-    quotation: ['added_at', 'common_name', 'scientific_name', 'quantity', 'rate', 'amount'],
+    boq: ['added_at', 'common_name', 'scientific_name', 'category', 'quantity'],
+    quotation: ['added_at', 'common_name', 'scientific_name', 'category', 'quantity', 'rate', 'amount'],
 };
 
-const SORT_OPTIONS: (PlantSort & { label: string; views: ViewMode[] })[] = [
-    { key: 'added_at', dir: 'desc', label: 'Recently added', views: ['standard', 'boq', 'quotation'] },
-    { key: 'added_at', dir: 'asc', label: 'Oldest added', views: ['standard', 'boq', 'quotation'] },
-    { key: 'common_name', dir: 'asc', label: 'Name (A–Z)', views: ['standard', 'boq', 'quotation'] },
-    { key: 'common_name', dir: 'desc', label: 'Name (Z–A)', views: ['standard', 'boq', 'quotation'] },
-    { key: 'scientific_name', dir: 'asc', label: 'Scientific name (A–Z)', views: ['standard', 'boq', 'quotation'] },
-    { key: 'category', dir: 'asc', label: 'Category (A–Z)', views: ['standard'] },
-    { key: 'planting_place', dir: 'asc', label: 'Place (A–Z)', views: ['standard'] },
-    { key: 'quantity', dir: 'desc', label: 'Quantity (high–low)', views: ['boq', 'quotation'] },
-    { key: 'quantity', dir: 'asc', label: 'Quantity (low–high)', views: ['boq', 'quotation'] },
-    { key: 'rate', dir: 'desc', label: 'Rate (high–low)', views: ['quotation'] },
-    { key: 'amount', dir: 'desc', label: 'Amount (high–low)', views: ['quotation'] },
+/** BOQ / quotation rows grouped by category already sit in category order, so sorting by it means nothing */
+const sortKeysFor = (view: ViewMode, grouped: boolean) =>
+    view !== 'standard' && grouped ? VIEW_SORT_KEYS[view].filter(k => k !== 'category') : VIEW_SORT_KEYS[view];
+
+/** Sort menu presets; each view lists the ones its sort keys allow */
+const SORT_OPTIONS: (PlantSort & { label: string })[] = [
+    { key: 'added_at', dir: 'desc', label: 'Recently added' },
+    { key: 'added_at', dir: 'asc', label: 'Oldest added' },
+    { key: 'common_name', dir: 'asc', label: 'Name (A–Z)' },
+    { key: 'common_name', dir: 'desc', label: 'Name (Z–A)' },
+    { key: 'scientific_name', dir: 'asc', label: 'Scientific name (A–Z)' },
+    { key: 'category', dir: 'asc', label: 'Category (A–Z)' },
+    { key: 'planting_place', dir: 'asc', label: 'Place (A–Z)' },
+    { key: 'quantity', dir: 'desc', label: 'Quantity (high–low)' },
+    { key: 'quantity', dir: 'asc', label: 'Quantity (low–high)' },
+    { key: 'rate', dir: 'desc', label: 'Rate (high–low)' },
+    { key: 'amount', dir: 'desc', label: 'Amount (high–low)' },
 ];
 
 const SORT_FIELD_LABELS: Record<SortKey, string> = {
@@ -575,9 +580,25 @@ const todayIso = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+/** BOQ / quotation common name; shows the category under it when rows aren't grouped by category */
+function BoqNameCell({ pp, showCategory }: { pp: ProjectPlant; showCategory: boolean }) {
+    const category = pp.plant?.category || 'Uncategorized';
+    return (
+        <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3`} title={pp.plant?.common_name}>
+            <span className="block truncate font-semibold text-foreground">{pp.plant?.common_name || '—'}</span>
+            {showCategory && (
+                <span className="block truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground" title={category}>
+                    {category}
+                </span>
+            )}
+        </TableCell>
+    );
+}
+
 const ProjectBoqRow = ({
     pp,
     idx,
+    showCategory,
     onDelete,
     onUpdate,
     isSelected,
@@ -586,6 +607,7 @@ const ProjectBoqRow = ({
 }: {
     pp: any;
     idx: number;
+    showCategory: boolean;
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
@@ -744,9 +766,7 @@ const ProjectBoqRow = ({
             </TableCell>
 
             {/* Common Name */}
-            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
-                {pp.plant?.common_name || '—'}
-            </TableCell>
+            <BoqNameCell pp={pp} showCategory={showCategory} />
 
             {/* Scientific Name */}
             <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
@@ -821,6 +841,7 @@ const ProjectBoqRow = ({
 const ProjectQuotationRow = ({
     pp,
     idx,
+    showCategory,
     onDelete,
     onUpdate,
     isSelected,
@@ -829,6 +850,7 @@ const ProjectQuotationRow = ({
 }: {
     pp: any;
     idx: number;
+    showCategory: boolean;
     onDelete: (plantId: string, plantName: string) => void;
     onUpdate: (plantId: string, data: any) => Promise<void>;
     isSelected: boolean;
@@ -995,9 +1017,7 @@ const ProjectQuotationRow = ({
                 </div>
             </TableCell>
 
-            <TableCell className={`${STICKY_NAME} ${STICKY_ROW_BG} px-3 font-semibold text-foreground truncate`} title={pp.plant?.common_name}>
-                {pp.plant?.common_name || '—'}
-            </TableCell>
+            <BoqNameCell pp={pp} showCategory={showCategory} />
 
             <TableCell className="italic text-muted-foreground text-xs w-40 max-w-[160px] truncate">
                 {pp.plant?.scientific_name || pp.plant?.taxon?.name || '—'}
@@ -1120,6 +1140,14 @@ export const ProjectDetails = () => {
         setStandardLayout(layout);
         try { localStorage.setItem('projectPlantsLayout', layout); } catch { /* storage unavailable */ }
     };
+    // BOQ / quotation: rows under category headings (sorted within each), or one list sorted as a whole
+    const [groupByCategory, setGroupByCategory] = useState(() => {
+        try { return localStorage.getItem('projectBoqGroupByCategory') !== 'off'; } catch { return true; }
+    });
+    const changeGroupByCategory = (on: boolean) => {
+        setGroupByCategory(on);
+        try { localStorage.setItem('projectBoqGroupByCategory', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    };
     const boqTableRef = useRef<HTMLTableElement>(null);
     const bulkBarRef = useRef<HTMLDivElement>(null);
 
@@ -1140,10 +1168,14 @@ export const ProjectDetails = () => {
     useEffect(() => {
         setSelectedPlantIds([]);
         setSelectMode(false);
-        // Drop a sort or row filter the new view doesn't offer (e.g. Amount outside the quotation)
+        // Drop a row filter the new view doesn't offer (Missing rate outside the quotation)
         if (viewMode === 'boq') setRowFilter(f => (f === 'no_rate' ? 'all' : f));
-        setSortState(s => (VIEW_SORT_KEYS[viewMode].includes(s.key) ? s : DEFAULT_SORT));
     }, [viewMode]);
+
+    // Drop a sort the view doesn't offer (e.g. Amount outside the quotation, Category while grouped)
+    useEffect(() => {
+        setSortState(s => (sortKeysFor(viewMode, groupByCategory).includes(s.key) ? s : DEFAULT_SORT));
+    }, [viewMode, groupByCategory]);
 
     /* ── Share link state ── */
     const [shareLink, setShareLink] = useState<ShareLinkInfo | null>(null);
@@ -1521,7 +1553,9 @@ export const ProjectDetails = () => {
         setSelectedPlantIds(prev => (prev.every(pid => visible.has(pid)) ? prev : prev.filter(pid => visible.has(pid))));
     }, [filteredSorted, isDocView]);
 
-    const boqGroups = useMemo(() => {
+    // One unnamed group when grouping is off: a single list in the chosen sort order
+    const boqGroups = useMemo((): [string | null, typeof filteredSorted][] => {
+        if (!groupByCategory) return [[null, filteredSorted]];
         const groups = new Map<string, typeof filteredSorted>();
         for (const pp of filteredSorted) {
             const cat = pp.plant?.category || 'Uncategorized';
@@ -1529,7 +1563,7 @@ export const ProjectDetails = () => {
             groups.get(cat)!.push(pp);
         }
         return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    }, [filteredSorted]);
+    }, [filteredSorted, groupByCategory]);
 
     const totalQuotationAmount = useMemo(() => {
         if (!project) return 0;
@@ -1556,7 +1590,7 @@ export const ProjectDetails = () => {
     const footerQty = filtersActive ? shownTotals.qty : totalQuotationQty;
     const footerAmount = filtersActive ? shownTotals.amount : totalQuotationAmount;
 
-    const sortOptions = SORT_OPTIONS.filter(o => o.views.includes(viewMode));
+    const sortOptions = SORT_OPTIONS.filter(o => sortKeysFor(viewMode, groupByCategory).includes(o.key));
     const rowFilterOptions = ROW_FILTER_OPTIONS.filter(o => !o.quotationOnly || viewMode === 'quotation');
 
 
@@ -1567,7 +1601,7 @@ export const ProjectDetails = () => {
         if (bulkBarRef.current) top = Math.max(top, bulkBarRef.current.getBoundingClientRect().bottom + 6);
         return top;
     }, []);
-    useFloatingTableHeader(boqTableRef, getHeaderTop, [viewMode, filteredSorted.length, selectedPlantIds.length > 0, isLoading]);
+    useFloatingTableHeader(boqTableRef, getHeaderTop, [viewMode, filteredSorted.length, selectedPlantIds.length > 0, isLoading, groupByCategory]);
 
     const projectPlantIds = useMemo(() => new Set(project?.plants.map(pp => pp.plant_id) ?? []), [project]);
     const selectedIdSet = useMemo(() => new Set(selectedPlantIds), [selectedPlantIds]);
@@ -1649,7 +1683,7 @@ export const ProjectDetails = () => {
             </div>
 
             {/* Filters + sort: two per row on phones so labels aren't cut off */}
-            <div className={cn('grid grid-cols-2 gap-2 w-full lg:flex lg:w-auto', isDocView && 'sm:grid-cols-3')}>
+            <div className={cn('grid grid-cols-2 gap-2 w-full lg:flex lg:w-auto', isDocView && 'md:grid-cols-4')}>
                 {/* Category */}
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                     <SelectTrigger aria-label="Filter by category" className={cn(toolbarSelect, categoryFilter !== '__all__' && toolbarSelectActive)}>
@@ -1688,7 +1722,7 @@ export const ProjectDetails = () => {
 
                 {/* Sort */}
                 <Select value={sortValue(sort)} onValueChange={v => { const next = parseSort(v); if (next) setSort(next); }}>
-                    <SelectTrigger aria-label="Sort plants" className={cn(toolbarSelect, 'gap-1.5', isDocView && 'col-span-2 sm:col-span-1')}>
+                    <SelectTrigger aria-label="Sort plants" className={cn(toolbarSelect, 'gap-1.5')}>
                         <span className="!flex items-center gap-1.5 min-w-0">
                             <ArrowDownUp className="hidden sm:block w-3.5 h-3.5 shrink-0 opacity-60" />
                             <span className="truncate">
@@ -1702,6 +1736,24 @@ export const ProjectDetails = () => {
                         ))}
                     </SelectContent>
                 </Select>
+
+                {/* BOQ / quotation: category headings on, or off to sort the whole list as one */}
+                {isDocView && (
+                    <label
+                        className="flex items-center gap-1.5 h-8 min-w-0 px-2 sm:px-2.5 rounded-md border border-input bg-background text-sm text-foreground cursor-pointer select-none whitespace-nowrap hover:bg-muted/40 transition-colors"
+                        title={groupByCategory
+                            ? 'Rows sit under category headings and sort within each. Turn off to sort the whole list.'
+                            : 'Rows are one list sorted as a whole. Turn on to put them under category headings.'}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={groupByCategory}
+                            onChange={(e) => changeGroupByCategory(e.target.checked)}
+                            className="w-4 h-4 shrink-0 cursor-pointer accent-primary"
+                        />
+                        <span className="truncate">Group by category</span>
+                    </label>
+                )}
             </div>
         </div>
     );
@@ -2088,13 +2140,15 @@ export const ProjectDetails = () => {
                                         </TableRow>
                                     ) : (
                                         boqGroups.map(([category, pps]) => (
-                                            <Fragment key={category}>
-                                                {/* Group Header Row */}
-                                                <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
-                                                    <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
-                                                        <span className="sticky left-5">{category} ({pps.length})</span>
-                                                    </TableCell>
-                                                </TableRow>
+                                            <Fragment key={category ?? '__all__'}>
+                                                {/* Group Header Row (none when grouping is off) */}
+                                                {category !== null && (
+                                                    <TableRow className="bg-muted/20 hover:bg-muted/20 border-y border-border/60">
+                                                        <TableCell colSpan={viewMode === 'quotation' ? 11 : 9} className="py-2.5 px-5 font-bold text-primary text-xs uppercase tracking-wider bg-muted/15 border-l-[3px] border-primary">
+                                                            <span className="sticky left-5">{category} ({pps.length})</span>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
                                                 {pps.map((pp, idx) => {
                                                     if (viewMode === 'boq') {
                                                         return (
@@ -2102,6 +2156,7 @@ export const ProjectDetails = () => {
                                                                 key={pp.plant_id}
                                                                 pp={pp}
                                                                 idx={idx}
+                                                                showCategory={category === null}
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
@@ -2115,6 +2170,7 @@ export const ProjectDetails = () => {
                                                                 key={pp.plant_id}
                                                                 pp={pp}
                                                                 idx={idx}
+                                                                showCategory={category === null}
                                                                 onDelete={handleDeletePlant}
                                                                 onUpdate={handleUpdateBoqFields}
                                                                 isSelected={selectedPlantIds.includes(pp.plant_id)}
