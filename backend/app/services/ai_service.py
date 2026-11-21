@@ -10,6 +10,10 @@ from app.schemas.ai import PlantAIDetailsResponse, TaxonomyDetails
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 
+class AIEmptyReplyError(Exception):
+    """The AI service answered, but with nothing usable."""
+
+
 def _groq_client() -> AsyncOpenAI:
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="Groq API Key is not configured")
@@ -179,9 +183,10 @@ async def generate_taxon_descriptions(taxa: list[dict]) -> list[Optional[str]]:
                 model=GROQ_MODEL,
                 temperature=0.2,
                 max_tokens=6000,
-                reasoning_effort="low",
+                # Sent in the body rather than as reasoning_effort=: older openai SDKs (as on the
+                # production server) reject that keyword with a TypeError before any request is made
+                extra_body={"reasoning_effort": "low"},
             )
-            break
         except RateLimitError as e:
             # Groq's per-minute token limit; wait as told, or back off
             retry_after = e.response.headers.get("retry-after") if e.response is not None else None
@@ -192,8 +197,18 @@ async def generate_taxon_descriptions(taxa: list[dict]) -> list[Optional[str]]:
             if attempt == 5:
                 raise
             await asyncio.sleep(min(wait, 90) + 1)
+            continue
+        # Groq now and then answers 200 with an error body and no choices
+        # (response.choices is None), which used to surface as a bare TypeError; try again
+        if response.choices:
+            break
+        if attempt == 5:
+            raise AIEmptyReplyError("the AI service returned no reply")
+        await asyncio.sleep(5 * (attempt + 1))
 
     data = _extract_json(response.choices[0].message.content or "")
+    if not isinstance(data, dict):
+        raise AIEmptyReplyError("the AI reply was not a JSON object")
     descriptions: list[Optional[str]] = []
     for i in range(len(taxa)):
         text = data.get(str(i))
