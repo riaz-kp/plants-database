@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal
 from app.models.enums import Rank
 from app.models.taxon import Taxon
-from app.services.ai_service import generate_taxon_descriptions
+from app.services.ai_service import AIEmptyReplyError, generate_taxon_descriptions
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,14 @@ def describe_fill_error(exc: Exception) -> str:
         reason = "Couldn't reach the AI service. Check the internet connection."
     elif isinstance(cause, HTTPException):
         reason = str(cause.detail)
-    elif isinstance(cause, (json.JSONDecodeError, EmptyReplyError)):
-        reason = "The AI's reply couldn't be read."
+    elif isinstance(cause, (json.JSONDecodeError, EmptyReplyError, AIEmptyReplyError)):
+        reason = "The AI's reply couldn't be read. Try again."
     else:
-        reason = f"Something went wrong ({type(cause).__name__})."
+        # Name the error and what it said, so an unexpected failure can be traced from the page
+        detail = str(cause).strip()
+        if len(detail) > 120:
+            detail = detail[:117] + "…"
+        reason = f"Something went wrong ({type(cause).__name__}{': ' + detail if detail else ''})."
     if isinstance(exc, DescriptionFillError) and exc.saved:
         reason = f"Saved {exc.saved}, but some failed. {reason}"
     return reason
